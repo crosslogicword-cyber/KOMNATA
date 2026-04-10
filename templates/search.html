@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+    <h2>Wyszukiwarka produktów</h2>
+    <form method="get" action="{{ url_for('search') }}" class="search-bar" autocomplete="off">
+        <input id="search-input" type="text" name="q" value="{{ query }}" placeholder="Wpisz nazwę produktu lub fragment...">
+        <button type="submit">Szukaj</button>
+    </form>
+    <div id="live-suggestions" class="suggestions-box"></div>
+</section>
+
+{% if query %}
+<section class="card">
+    <h2>Wyniki dla: „{{ query }}”</h2>
+    {% if results %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Produkt</th>
+                    <th>Lokalizacja</th>
+                    <th>Ilość</th>
+                    <th>Notatki</th>
+                    <th>Ostatnia zmiana</th>
+                    <th>Akcje</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in results %}
+                <tr>
+                    <td>{{ item.product_name }}</td>
+                    <td><strong>{{ item.sector_name }}</strong> / {{ item.rack_name }} / {{ item.slot_code or '-' }}</td>
+                    <td>{{ item.quantity or '-' }}</td>
+                    <td>{{ item.notes or '-' }}</td>
+                    <td>{{ item.updated_at_display }}</td>
+                    <td class="actions-cell">
+                        <a class="button-inline" href="{{ url_for('edit_item', item_id=item.id) }}">Edytuj</a>
+                        <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}" onsubmit="return confirm('Usunąć tę pozycję?');">
+                            <input type="hidden" name="next" value="{{ request.full_path }}">
+                            <button class="danger" type="submit">Usuń</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Brak dokładnych trafień.</p>
+    {% endif %}
+
+    {% if suggestions %}
+    <div class="suggested-list">
+        <h3>Podobne lub znalezione pozycje</h3>
+        <ul>
+            {% for suggestion in suggestions %}
+            <li>{{ suggestion.product_name }} — <strong>{{ suggestion.sector }}</strong> / {{ suggestion.rack }} / {{ suggestion.slot }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+
+<script>
+const input = document.getElementById('search-input');
+const box = document.getElementById('live-suggestions');
+
+input.addEventListener('input', async (e) => {
+  const q = e.target.value.trim();
+  if (!q) {
+    box.innerHTML = '';
+    return;
+  }
+  const res = await fetch(`/api/suggestions?q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  box.innerHTML = data.length
+    ? '<ul>' + data.map(item => `<li><strong>${item.product_name}</strong><br><span>${item.sector} / ${item.rack} / ${item.slot}</span></li>`).join('') + '</ul>'
+    : '<p>Brak podobnych pozycji.</p>';
+});
+</script>
+{% endblock %}

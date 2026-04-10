@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+    <h2>Podgląd regałów i sektorów</h2>
+    <form method="get" class="form-grid">
+        <label>Sektor
+            <select name="sector">
+                <option value="">Wszystkie sektory</option>
+                {% for sector in sectors %}
+                <option value="{{ sector.name }}" {% if selected_sector == sector.name %}selected{% endif %}>{{ sector.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Regał
+            <select name="rack">
+                <option value="">Wszystkie regały</option>
+                {% for rack in racks %}
+                <option value="{{ rack.name }}" {% if selected_rack == rack.name %}selected{% endif %}>{{ rack.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Miejsce
+            <select name="slot">
+                <option value="">Wszystkie miejsca</option>
+                {% for code in all_slot_codes %}
+                <option value="{{ code }}" {% if selected_slot == code %}selected{% endif %}>{{ code }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit">Filtruj</button>
+    </form>
+</section>
+
+<section class="card">
+    {% if grouped %}
+        {% for (sector_name, rack_name, slot_code), items in grouped.items() %}
+            <div class="location-block">
+                <h3>{{ sector_name }} / {{ rack_name }} / {{ slot_code }}</h3>
+                <ul class="item-list">
+                    {% for item in items %}
+                    <li>
+                        <strong>{{ item.product_name }}</strong>
+                        {% if item.quantity %}<span> — {{ item.quantity }}</span>{% endif %}
+                        {% if item.notes %}<div class="muted">{{ item.notes }}</div>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p>Nie ma jeszcze produktów w tym widoku.</p>
+    {% endif %}
+</section>
+{% endblock %}

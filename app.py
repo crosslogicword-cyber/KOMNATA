@@ -1,0 +1,778 @@
+import os
+import re
+import sqlite3
+from contextlib import closing
+from difflib import SequenceMatcher
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'komnata.db')
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'komnata-dev-secret')
+
+DEFAULT_SECTORS = [f"{row} {col}" for row in range(1, 7) for col in ["A", "B", "C"]]
+DEFAULT_LAYOUTS = [
+    {
+        'name': 'Standard 0-5 A,B',
+        'start_number': 0,
+        'end_number': 5,
+        'letters': 'A,B',
+        'description': 'Domyślny układ startowy dla każdego regału.',
+    },
+    {
+        'name': 'Rozszerzenie 0-5 A,B,C',
+        'start_number': 0,
+        'end_number': 5,
+        'letters': 'A,B,C',
+        'description': 'Układ rozszerzony o dodatkowy poziom C.',
+    },
+]
+DEFAULT_RACK_NAMES = [f"Regał {number}" for number in range(1, 7)]
+OPTIONAL_SECTOR_NAME = 'Bez sektora'
+OPTIONAL_RACK_NAME = 'Bez regału'
+NUMERIC_PREFIX_RE = re.compile(r'^(\d+)')
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def natural_sort_key(value: str):
+    value = value or ''
+    match = NUMERIC_PREFIX_RE.match(value)
+    if match:
+        return (0, int(match.group(1)), value[len(match.group(1)):])
+    return (1, value)
+
+
+def normalize_letters(raw_letters: str) -> str:
+    letters = []
+    seen = set()
+    for chunk in (raw_letters or '').replace(';', ',').split(','):
+        letter = chunk.strip().upper()
+        if not letter:
+            continue
+        if not re.fullmatch(r'[A-Z0-9]+', letter):
+            continue
+        if letter in seen:
+            continue
+        seen.add(letter)
+        letters.append(letter)
+    return ','.join(letters)
+
+
+def build_slot_codes(start_number: int, end_number: int, letters_csv: str):
+    letters = [letter.strip().upper() for letter in (letters_csv or '').split(',') if letter.strip()]
+    if end_number < start_number:
+        start_number, end_number = end_number, start_number
+    return [f"{number}{letter}" for number in range(start_number, end_number + 1) for letter in letters]
+
+
+def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str):
+    columns = {row['name'] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def get_layout_by_name(conn: sqlite3.Connection, name: str):
+    return conn.execute("SELECT * FROM layouts WHERE name = ?", (name,)).fetchone()
+
+
+def apply_layout_to_rack(conn: sqlite3.Connection, rack_id: int, layout_row: sqlite3.Row):
+    codes = build_slot_codes(layout_row['start_number'], layout_row['end_number'], layout_row['letters'])
+    for sort_order, code in enumerate(codes, start=1):
+        conn.execute(
+            """
+            INSERT INTO rack_slots(rack_id, code, is_active, sort_order)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(rack_id, code) DO UPDATE SET
+                is_active = 1,
+                sort_order = excluded.sort_order
+            """,
+            (rack_id, code, sort_order),
+        )
+
+
+def fetch_layouts(active_only: bool = True):
+    query = "SELECT * FROM layouts"
+    if active_only:
+        query += " WHERE is_active = 1"
+    query += " ORDER BY name COLLATE NOCASE"
+    with closing(get_db()) as conn:
+        return conn.execute(query).fetchall()
+
+
+def fetch_sectors(active_only: bool = True):
+    query = "SELECT * FROM sectors"
+    conditions = ["name <> ?"]
+    params = [OPTIONAL_SECTOR_NAME]
+    if active_only:
+        conditions.append("is_active = 1")
+    query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY name COLLATE NOCASE"
+    with closing(get_db()) as conn:
+        return conn.execute(query, params).fetchall()
+
+
+def fetch_racks(active_only: bool = True, only_main_racks: bool = False):
+    query = """
+        SELECT racks.*, layouts.name AS layout_name
+        FROM racks
+        LEFT JOIN layouts ON layouts.id = racks.layout_id
+    """
+    conditions = []
+    params = []
+    if active_only:
+        conditions.append("racks.is_active = 1")
+    if only_main_racks:
+        conditions.append("racks.name GLOB 'Regał [0-9]*'")
+        conditions.append("racks.name <> ?")
+        params.append(OPTIONAL_RACK_NAME)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY racks.name COLLATE NOCASE"
+    with closing(get_db()) as conn:
+        return conn.execute(query, params).fetchall()
+
+
+def fetch_slots_by_rack(active_only: bool = True):
+    query = "SELECT rack_slots.*, racks.name AS rack_name FROM rack_slots JOIN racks ON racks.id = rack_slots.rack_id"
+    if active_only:
+        query += " WHERE rack_slots.is_active = 1"
+    query += " ORDER BY racks.name COLLATE NOCASE, rack_slots.sort_order, rack_slots.code COLLATE NOCASE"
+    with closing(get_db()) as conn:
+        rows = conn.execute(query).fetchall()
+
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(str(row['rack_id']), []).append({'id': row['id'], 'code': row['code']})
+    return grouped
+
+
+def fetch_slot_counts():
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT rack_id, COUNT(*) AS slot_count FROM rack_slots WHERE is_active = 1 GROUP BY rack_id"
+        ).fetchall()
+    return {row['rack_id']: row['slot_count'] for row in rows}
+
+
+def all_active_slot_codes():
+    with closing(get_db()) as conn:
+        rows = conn.execute("SELECT DISTINCT code FROM rack_slots WHERE is_active = 1").fetchall()
+    return sorted((row['code'] for row in rows), key=natural_sort_key)
+
+
+def item_base_select():
+    return """
+        SELECT items.id,
+               items.product_name,
+               items.quantity,
+               items.notes,
+               items.extra_field,
+               items.created_at,
+               COALESCE(items.updated_at, items.created_at) AS updated_at,
+               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at)) AS updated_at_display,
+               items.sector_id,
+               items.rack_id,
+               items.slot_id,
+               CASE WHEN sectors.name = 'Bez sektora' THEN '-' ELSE sectors.name END AS sector_name,
+               CASE WHEN racks.name = 'Bez regału' THEN '-' ELSE racks.name END AS rack_name,
+               rack_slots.code AS slot_code
+        FROM items
+        JOIN sectors ON sectors.id = items.sector_id
+        JOIN racks ON racks.id = items.rack_id
+        LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
+    """
+
+
+def record_item_history(conn: sqlite3.Connection, item_id: int | None, action: str, details: str = ''):
+    conn.execute(
+        "INSERT INTO item_history(item_id, action, details) VALUES (?, ?, ?)",
+        (item_id, action, details.strip() or None),
+    )
+
+
+def get_latest_system_activity():
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            "SELECT strftime('%d.%m.%Y %H:%M', changed_at) AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+    return row['changed_at_display'] if row and row['changed_at_display'] else None
+
+
+@app.context_processor
+def inject_system_meta():
+    return {'latest_system_activity': get_latest_system_activity()}
+
+
+def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_raw: str, slot_id_raw: str):
+    sector_id = (sector_id_raw or '').strip()
+    rack_id = (rack_id_raw or '').strip()
+    slot_id = (slot_id_raw or '').strip()
+
+    if not sector_id and not rack_id:
+        return None, None, None, 'Wybierz przynajmniej sektor albo regał z miejscem.'
+
+    if not sector_id:
+        fallback_sector = conn.execute(
+            "SELECT id FROM sectors WHERE name = ?",
+            (OPTIONAL_SECTOR_NAME,),
+        ).fetchone()
+        sector_id = str(fallback_sector['id']) if fallback_sector else ''
+    else:
+        sector_exists = conn.execute(
+            "SELECT id FROM sectors WHERE id = ? AND is_active = 1",
+            (sector_id,),
+        ).fetchone()
+        if sector_exists is None:
+            return None, None, None, 'Wybrany sektor nie istnieje albo jest nieaktywny.'
+
+    if not rack_id:
+        fallback_rack = conn.execute(
+            "SELECT id FROM racks WHERE name = ?",
+            (OPTIONAL_RACK_NAME,),
+        ).fetchone()
+        rack_id = str(fallback_rack['id']) if fallback_rack else ''
+        slot_id = ''
+    else:
+        rack_exists = conn.execute(
+            "SELECT id FROM racks WHERE id = ? AND is_active = 1",
+            (rack_id,),
+        ).fetchone()
+        if rack_exists is None:
+            return None, None, None, 'Wybrany regał nie istnieje albo jest nieaktywny.'
+        if not slot_id:
+            return None, None, None, 'Jeśli wybierasz regał, wskaż też miejsce w regale.'
+        slot_row = conn.execute(
+            "SELECT id FROM rack_slots WHERE id = ? AND rack_id = ? AND is_active = 1",
+            (slot_id, rack_id),
+        ).fetchone()
+        if slot_row is None:
+            return None, None, None, 'Wybrane miejsce nie należy do tego regału albo jest nieaktywne.'
+
+    return int(sector_id), int(rack_id), int(slot_id) if slot_id else None, None
+
+
+def init_db():
+    with closing(get_db()) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sectors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS layouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                start_number INTEGER NOT NULL,
+                end_number INTEGER NOT NULL,
+                letters TEXT NOT NULL,
+                description TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS racks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                layout_id INTEGER,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(layout_id) REFERENCES layouts(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS rack_slots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rack_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(rack_id, code),
+                FOREIGN KEY(rack_id) REFERENCES racks(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_name TEXT NOT NULL,
+                quantity TEXT,
+                notes TEXT,
+                extra_field TEXT,
+                sector_id INTEGER NOT NULL,
+                rack_id INTEGER NOT NULL,
+                slot_id INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                FOREIGN KEY(sector_id) REFERENCES sectors(id),
+                FOREIGN KEY(rack_id) REFERENCES racks(id),
+                FOREIGN KEY(slot_id) REFERENCES rack_slots(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS item_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                action TEXT NOT NULL,
+                details TEXT,
+                changed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+
+        ensure_column(conn, 'items', 'slot_id', 'INTEGER')
+        ensure_column(conn, 'items', 'extra_field', 'TEXT')
+        ensure_column(conn, 'items', 'updated_at', 'TEXT')
+        ensure_column(conn, 'racks', 'layout_id', 'INTEGER')
+        ensure_column(conn, 'rack_slots', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
+
+        conn.execute("UPDATE items SET updated_at = created_at WHERE updated_at IS NULL")
+
+        for sector_name in DEFAULT_SECTORS:
+            conn.execute("INSERT OR IGNORE INTO sectors(name, is_active) VALUES (?, 1)", (sector_name,))
+        conn.execute("INSERT OR IGNORE INTO sectors(name, is_active) VALUES (?, 1)", (OPTIONAL_SECTOR_NAME,))
+
+        for layout in DEFAULT_LAYOUTS:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO layouts(name, start_number, end_number, letters, description, is_active)
+                VALUES (?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    layout['name'],
+                    layout['start_number'],
+                    layout['end_number'],
+                    layout['letters'],
+                    layout['description'],
+                ),
+            )
+
+        standard_layout = get_layout_by_name(conn, 'Standard 0-5 A,B')
+        conn.execute("INSERT OR IGNORE INTO racks(name, layout_id, is_active) VALUES (?, NULL, 1)", (OPTIONAL_RACK_NAME,))
+
+        existing_rack_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM racks WHERE name <> ?",
+            (OPTIONAL_RACK_NAME,),
+        ).fetchone()['count']
+        if existing_rack_count == 0 and standard_layout:
+            for rack_name in DEFAULT_RACK_NAMES:
+                conn.execute(
+                    "INSERT INTO racks(name, layout_id, is_active) VALUES (?, ?, 1)",
+                    (rack_name, standard_layout['id']),
+                )
+
+        rack_rows = conn.execute("SELECT * FROM racks ORDER BY id").fetchall()
+        for rack in rack_rows:
+            if rack['name'] == OPTIONAL_RACK_NAME:
+                continue
+            layout_row = None
+            if rack['layout_id']:
+                layout_row = conn.execute("SELECT * FROM layouts WHERE id = ?", (rack['layout_id'],)).fetchone()
+            else:
+                layout_row = standard_layout
+                if layout_row:
+                    conn.execute("UPDATE racks SET layout_id = ? WHERE id = ?", (layout_row['id'], rack['id']))
+            if layout_row:
+                apply_layout_to_rack(conn, rack['id'], layout_row)
+
+        conn.commit()
+
+
+def search_suggestions(term: str, limit: int = 8):
+    clean = (term or '').strip().lower()
+    if not clean:
+        return []
+
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            item_base_select() + " ORDER BY items.product_name COLLATE NOCASE"
+        ).fetchall()
+
+    scored = []
+    seen = set()
+    for row in rows:
+        lowered = row['product_name'].lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+
+        score = 0
+        if clean in lowered:
+            score += 100
+        score += int(SequenceMatcher(None, clean, lowered).ratio() * 100)
+        if score >= 35:
+            scored.append(
+                {
+                    'product_name': row['product_name'],
+                    'sector': row['sector_name'],
+                    'rack': row['rack_name'],
+                    'slot': row['slot_code'] or '-',
+                    'score': score,
+                }
+            )
+    scored.sort(key=lambda item: (-item['score'], item['product_name'].lower()))
+    return scored[:limit]
+
+
+@app.route('/')
+def dashboard():
+    selected_sector = request.args.get('sector', '').strip()
+    selected_rack = request.args.get('rack', '').strip()
+    selected_slot = request.args.get('slot', '').strip()
+
+    conditions = []
+    params = []
+    if selected_sector:
+        conditions.append('sectors.name = ?')
+        params.append(selected_sector)
+    if selected_rack:
+        conditions.append('racks.name = ?')
+        params.append(selected_rack)
+    if selected_slot:
+        conditions.append('rack_slots.code = ?')
+        params.append(selected_slot)
+
+    query = item_base_select()
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    query += ' ORDER BY sectors.name COLLATE NOCASE, racks.name COLLATE NOCASE, rack_slots.code COLLATE NOCASE, items.created_at ASC, items.product_name COLLATE NOCASE'
+
+    with closing(get_db()) as conn:
+        items = conn.execute(query, params).fetchall()
+
+    grouped = {}
+    for item in items:
+        key = (item['sector_name'], item['rack_name'], item['slot_code'] or '-')
+        grouped.setdefault(key, []).append(item)
+
+    return render_template(
+        'dashboard.html',
+        sectors=fetch_sectors(),
+        racks=fetch_racks(only_main_racks=True),
+        grouped=grouped,
+        selected_sector=selected_sector,
+        selected_rack=selected_rack,
+        selected_slot=selected_slot,
+        all_slot_codes=all_active_slot_codes(),
+        slots_by_rack=fetch_slots_by_rack(),
+    )
+
+
+@app.route('/items/add', methods=['POST'])
+def add_item():
+    product_name = request.form.get('product_name', '').strip()
+    quantity = request.form.get('quantity', '').strip()
+    notes = request.form.get('notes', '').strip()
+    extra_field = ''
+    sector_id = request.form.get('sector_id', '').strip()
+    rack_id = request.form.get('rack_id', '').strip()
+    slot_id = request.form.get('slot_id', '').strip()
+
+    if not product_name:
+        flash('Uzupełnij nazwę produktu.', 'error')
+        return redirect(url_for('dashboard'))
+
+    with closing(get_db()) as conn:
+        sector_id_resolved, rack_id_resolved, slot_id_resolved, error = resolve_location_ids(conn, sector_id, rack_id, slot_id)
+        if error:
+            flash(error, 'error')
+            return redirect(url_for('dashboard'))
+
+        cursor = conn.execute(
+            """
+            INSERT INTO items(product_name, quantity, notes, extra_field, sector_id, rack_id, slot_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (product_name, quantity, notes, extra_field, sector_id_resolved, rack_id_resolved, slot_id_resolved),
+        )
+        item_id = cursor.lastrowid
+        record_item_history(conn, item_id, 'create', f'Dodano produkt: {product_name}')
+        conn.commit()
+
+    flash(f'Dodano produkt: {product_name}', 'success')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
+def edit_item(item_id):
+    mode = 'edit'
+    with closing(get_db()) as conn:
+        item = conn.execute(item_base_select() + ' WHERE items.id = ?', (item_id,)).fetchone()
+        if item is None:
+            flash('Nie znaleziono wskazanego produktu.', 'error')
+            return redirect(url_for('search'))
+
+        if request.method == 'POST':
+            product_name = request.form.get('product_name', '').strip()
+            quantity = request.form.get('quantity', '').strip()
+            notes = request.form.get('notes', '').strip()
+            extra_field = ''
+            sector_id = request.form.get('sector_id', '').strip()
+            rack_id = request.form.get('rack_id', '').strip()
+            slot_id = request.form.get('slot_id', '').strip()
+
+            if not product_name:
+                flash('Uzupełnij nazwę produktu.', 'error')
+                return redirect(url_for('edit_item', item_id=item_id, mode=mode))
+
+            sector_id_resolved, rack_id_resolved, slot_id_resolved, error = resolve_location_ids(conn, sector_id, rack_id, slot_id)
+            if error:
+                flash(error, 'error')
+                return redirect(url_for('edit_item', item_id=item_id, mode=mode))
+
+            old_location = f"{item['sector_name']} / {item['rack_name']} / {item['slot_code'] or '-'}"
+            new_sector_name = conn.execute("SELECT CASE WHEN name = ? THEN '-' ELSE name END AS name FROM sectors WHERE id = ?", (OPTIONAL_SECTOR_NAME, sector_id_resolved)).fetchone()['name']
+            new_rack_name = conn.execute("SELECT CASE WHEN name = ? THEN '-' ELSE name END AS name FROM racks WHERE id = ?", (OPTIONAL_RACK_NAME, rack_id_resolved)).fetchone()['name']
+            new_slot_name = '-'
+            if slot_id_resolved:
+                slot_row = conn.execute("SELECT code FROM rack_slots WHERE id = ?", (slot_id_resolved,)).fetchone()
+                new_slot_name = slot_row['code'] if slot_row else '-'
+            new_location = f"{new_sector_name} / {new_rack_name} / {new_slot_name}"
+
+            action = 'move' if old_location != new_location else 'edit'
+            detail_parts = []
+            if action == 'move':
+                detail_parts.append(f'Przeniesiono: {old_location} → {new_location}')
+            else:
+                detail_parts.append(f'Edytowano produkt: {product_name}')
+
+            conn.execute(
+                """
+                UPDATE items
+                SET product_name = ?,
+                    quantity = ?,
+                    notes = ?,
+                    extra_field = ?,
+                    sector_id = ?,
+                    rack_id = ?,
+                    slot_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (product_name, quantity, notes, extra_field, sector_id_resolved, rack_id_resolved, slot_id_resolved, item_id),
+            )
+            record_item_history(conn, item_id, action, '; '.join(detail_parts))
+            conn.commit()
+
+            flash('Pozycja została zaktualizowana.', 'success')
+            return redirect(url_for('search', q=product_name))
+
+    return render_template(
+        'item_form.html',
+        item=item,
+        sectors=fetch_sectors(),
+        racks=fetch_racks(only_main_racks=True),
+        slots_by_rack=fetch_slots_by_rack(),
+        mode=mode,
+    )
+
+
+@app.route('/items/<int:item_id>/delete', methods=['POST'])
+def delete_item(item_id):
+    redirect_target = request.form.get('next') or request.referrer or url_for('dashboard')
+    with closing(get_db()) as conn:
+        item = conn.execute(item_base_select() + ' WHERE items.id = ?', (item_id,)).fetchone()
+        if item is None:
+            flash('Nie znaleziono pozycji do usunięcia.', 'error')
+            return redirect(redirect_target)
+        record_item_history(conn, item_id, 'delete', f"Usunięto produkt: {item['product_name']} z {item['sector_name']} / {item['rack_name']} / {item['slot_code'] or '-'}")
+        conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
+        conn.commit()
+    flash('Pozycja została usunięta.', 'success')
+    return redirect(redirect_target)
+
+
+@app.route('/search')
+def search():
+    query = request.args.get('q', '').strip()
+    results = []
+    suggestions = []
+    if query:
+        with closing(get_db()) as conn:
+            results = conn.execute(
+                item_base_select() + " WHERE items.product_name LIKE ? OR items.notes LIKE ? ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.product_name COLLATE NOCASE",
+                (f'%{query}%', f'%{query}%'),
+            ).fetchall()
+        suggestions = search_suggestions(query)
+    return render_template('search.html', query=query, results=results, suggestions=suggestions)
+
+
+@app.route('/api/suggestions')
+def api_suggestions():
+    term = request.args.get('q', '').strip()
+    return jsonify(search_suggestions(term))
+
+
+@app.route('/storage')
+def storage_map():
+    selected_sector = request.args.get('sector', '').strip()
+    selected_rack = request.args.get('rack', '').strip()
+    selected_slot = request.args.get('slot', '').strip()
+
+    query = item_base_select()
+    conditions = []
+    params = []
+    if selected_sector:
+        conditions.append('sectors.name = ?')
+        params.append(selected_sector)
+    if selected_rack:
+        conditions.append('racks.name = ?')
+        params.append(selected_rack)
+    if selected_slot:
+        conditions.append('rack_slots.code = ?')
+        params.append(selected_slot)
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    query += ' ORDER BY sectors.name COLLATE NOCASE, racks.name COLLATE NOCASE, rack_slots.code COLLATE NOCASE, items.created_at ASC, items.product_name COLLATE NOCASE'
+
+    with closing(get_db()) as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    grouped = {}
+    for row in rows:
+        grouped.setdefault((row['sector_name'], row['rack_name'], row['slot_code'] or '-'), []).append(row)
+
+    return render_template(
+        'storage.html',
+        grouped=grouped,
+        sectors=fetch_sectors(),
+        racks=fetch_racks(only_main_racks=True),
+        selected_sector=selected_sector,
+        selected_rack=selected_rack,
+        selected_slot=selected_slot,
+        all_slot_codes=all_active_slot_codes(),
+    )
+
+
+@app.route('/print')
+def print_view():
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            item_base_select() + ' ORDER BY items.created_at ASC, items.product_name COLLATE NOCASE'
+        ).fetchall()
+
+    grouped = {}
+    order_meta = []
+    for row in rows:
+        key = (row['sector_name'], row['rack_name'], row['slot_code'] or '-')
+        if key not in grouped:
+            order_meta.append((key, row['created_at']))
+        grouped.setdefault(key, []).append(row)
+
+    ordered_keys = [key for key, _ in sorted(order_meta, key=lambda item: item[1] or '')]
+    ordered_grouped = [(key, grouped[key]) for key in ordered_keys]
+
+    html = render_template('print.html', grouped=ordered_grouped)
+    return Response(html, mimetype='text/html')
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    if request.method == 'POST':
+        item_type = request.form.get('item_type', '').strip()
+
+        if item_type == 'sector':
+            name = request.form.get('name', '').strip()
+            if not name:
+                flash('Podaj nazwę nowego sektora.', 'error')
+                return redirect(url_for('settings'))
+            with closing(get_db()) as conn:
+                conn.execute('INSERT OR IGNORE INTO sectors(name, is_active) VALUES (?, 1)', (name,))
+                conn.commit()
+            flash('Dodano nowy sektor.', 'success')
+            return redirect(url_for('settings'))
+
+        if item_type == 'layout':
+            name = request.form.get('layout_name', '').strip()
+            description = request.form.get('description', '').strip()
+            start_number_raw = request.form.get('start_number', '').strip()
+            end_number_raw = request.form.get('end_number', '').strip()
+            letters = normalize_letters(request.form.get('letters', ''))
+            if not name or not start_number_raw or not end_number_raw or not letters:
+                flash('Podaj nazwę układu, zakres numerów i litery miejsc.', 'error')
+                return redirect(url_for('settings'))
+            try:
+                start_number = int(start_number_raw)
+                end_number = int(end_number_raw)
+            except ValueError:
+                flash('Zakres numerów musi składać się z liczb całkowitych.', 'error')
+                return redirect(url_for('settings'))
+
+            with closing(get_db()) as conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO layouts(name, start_number, end_number, letters, description, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    """,
+                    (name, start_number, end_number, letters, description),
+                )
+                conn.commit()
+            flash('Dodano nowy własny układ regału.', 'success')
+            return redirect(url_for('settings'))
+
+        if item_type == 'rack':
+            name = request.form.get('name', '').strip()
+            layout_id = request.form.get('layout_id', '').strip()
+            if not name:
+                flash('Podaj nazwę nowego regału.', 'error')
+                return redirect(url_for('settings'))
+            with closing(get_db()) as conn:
+                layout_row = None
+                if layout_id:
+                    layout_row = conn.execute('SELECT * FROM layouts WHERE id = ?', (layout_id,)).fetchone()
+                if layout_row is None:
+                    layout_row = get_layout_by_name(conn, 'Standard 0-5 A,B')
+                conn.execute(
+                    'INSERT OR IGNORE INTO racks(name, layout_id, is_active) VALUES (?, ?, 1)',
+                    (name, layout_row['id'] if layout_row else None),
+                )
+                rack_row = conn.execute('SELECT * FROM racks WHERE name = ?', (name,)).fetchone()
+                if rack_row and layout_row:
+                    apply_layout_to_rack(conn, rack_row['id'], layout_row)
+                conn.commit()
+            flash('Dodano nowy regał i przypisano mu układ miejsc.', 'success')
+            return redirect(url_for('settings'))
+
+        if item_type == 'apply_layout':
+            rack_id = request.form.get('rack_id', '').strip()
+            layout_id = request.form.get('layout_id', '').strip()
+            if not rack_id or not layout_id:
+                flash('Wybierz regał i układ do zastosowania.', 'error')
+                return redirect(url_for('settings'))
+            with closing(get_db()) as conn:
+                rack_row = conn.execute('SELECT * FROM racks WHERE id = ?', (rack_id,)).fetchone()
+                layout_row = conn.execute('SELECT * FROM layouts WHERE id = ?', (layout_id,)).fetchone()
+                if rack_row is None or layout_row is None:
+                    flash('Nie znaleziono wybranego regału lub układu.', 'error')
+                    return redirect(url_for('settings'))
+                apply_layout_to_rack(conn, int(rack_id), layout_row)
+                conn.execute('UPDATE racks SET layout_id = ? WHERE id = ?', (layout_id, rack_id))
+                conn.commit()
+            flash('Układ został zastosowany do regału. Brakujące miejsca zostały dodane.', 'success')
+            return redirect(url_for('settings'))
+
+        flash('Nieznana akcja ustawień.', 'error')
+        return redirect(url_for('settings'))
+
+    return render_template(
+        'settings.html',
+        sectors=fetch_sectors(active_only=False),
+        racks=fetch_racks(active_only=False),
+        layouts=fetch_layouts(active_only=False),
+        slot_counts=fetch_slot_counts(),
+        slot_codes_default=build_slot_codes(0, 5, 'A,B'),
+        slot_codes_c=build_slot_codes(0, 5, 'C'),
+    )
+
+
+if __name__ == '__main__':
+    init_db()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
+else:
+    init_db()

@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid">
+    <section class="card">
+        <h2>Dodaj sektor</h2>
+        <form method="post" class="form-grid">
+            <input type="hidden" name="item_type" value="sector">
+            <label>Nazwa sektora
+                <input type="text" name="name" placeholder="np. 7 A" required>
+            </label>
+            <button type="submit">Dodaj sektor</button>
+        </form>
+        <p class="muted">Lista sektorów jest niezależna od regałów i może być rozbudowywana osobno.</p>
+    </section>
+
+    <section class="card">
+        <h2>Dodaj regał</h2>
+        <form method="post" class="form-grid">
+            <input type="hidden" name="item_type" value="rack">
+            <label>Nazwa regału
+                <input type="text" name="name" placeholder="np. Regał 7" required>
+            </label>
+            <label>Układ startowy
+                <select name="layout_id">
+                    {% for layout in layouts %}
+                    <option value="{{ layout.id }}" {% if layout.name == 'Standard 0-5 A,B' %}selected{% endif %}>{{ layout.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Dodaj regał z wybranym układem</button>
+        </form>
+        <p class="muted">Domyślnie wybierz standard 0–5 + A,B. Jeśli potrzebujesz więcej poziomów lub innego zakresu, użyj własnego układu poniżej.</p>
+    </section>
+</div>
+
+<div class="grid">
+    <section class="card">
+        <h2>Własny układ regału</h2>
+        <form method="post" class="form-grid">
+            <input type="hidden" name="item_type" value="layout">
+            <label>Nazwa układu
+                <input type="text" name="layout_name" placeholder="np. Magazyn wysoki 0-8 A,B,C" required>
+            </label>
+            <label>Od numeru
+                <input type="number" name="start_number" value="0" required>
+            </label>
+            <label>Do numeru
+                <input type="number" name="end_number" value="5" required>
+            </label>
+            <label>Litery miejsc
+                <input type="text" name="letters" placeholder="np. A,B lub A,B,C" required>
+            </label>
+            <label class="full">Opis / notatka
+                <input type="text" name="description" placeholder="np. dodatkowy poziom C albo długi regał 0-9">
+            </label>
+            <button type="submit">Zapisz własny układ</button>
+        </form>
+        <p class="muted">Tutaj użytkownik może zbudować własny wzór regału. Przykłady: <strong>0–5 + A,B</strong>, <strong>0–5 + A,B,C</strong>, <strong>1–8 + A,B</strong>, <strong>0–9 + A,B,C,D</strong>.</p>
+    </section>
+
+    <section class="card">
+        <h2>Zastosuj układ do istniejącego regału</h2>
+        <form method="post" class="form-grid">
+            <input type="hidden" name="item_type" value="apply_layout">
+            <label>Wybierz regał
+                <select name="rack_id" required>
+                    <option value="">Wybierz regał</option>
+                    {% for rack in racks %}
+                    <option value="{{ rack.id }}">{{ rack.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Wybierz układ
+                <select name="layout_id" required>
+                    <option value="">Wybierz układ</option>
+                    {% for layout in layouts %}
+                    <option value="{{ layout.id }}">{{ layout.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Dodaj brakujące miejsca do regału</button>
+        </form>
+        <p class="muted">Ta opcja nie kasuje istniejących miejsc. Po prostu dopina brakujące pozycje, np. cały zakres C albo większy zakres numerów.</p>
+    </section>
+</div>
+
+<div class="grid">
+    <section class="card">
+        <h2>Wzory startowe</h2>
+        <div class="tag-wrap">
+            {% for code in slot_codes_default %}<span class="tag">{{ code }}</span>{% endfor %}
+        </div>
+        <p class="muted" style="margin-top:10px;">Dodatkowy poziom C, który można dołączyć później:</p>
+        <div class="tag-wrap">
+            {% for code in slot_codes_c %}<span class="tag">{{ code }}</span>{% endfor %}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Zapisane układy</h2>
+        {% for layout in layouts %}
+        <div class="rack-card">
+            <strong>{{ layout.name }}</strong>
+            <div class="muted">Zakres: {{ layout.start_number }}–{{ layout.end_number }}</div>
+            <div class="muted">Litery: {{ layout.letters }}</div>
+            {% if layout.description %}<div class="muted">{{ layout.description }}</div>{% endif %}
+        </div>
+        {% endfor %}
+    </section>
+</div>
+
+<section class="card">
+    <h2>Aktualne sektory</h2>
+    <div class="tag-wrap">
+        {% for sector in sectors %}<span class="tag">{{ sector.name }}</span>{% endfor %}
+    </div>
+</section>
+
+<section class="card">
+    <h2>Aktualne regały</h2>
+    <div class="rack-summary">
+        {% for rack in racks %}
+        <div class="rack-card">
+            <strong>{{ rack.name }}</strong>
+            <div class="muted">Aktywnych miejsc: {{ slot_counts.get(rack.id, 0) }}</div>
+            <div class="muted">Ostatnio przypisany układ: {{ rack.layout_name or 'brak' }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

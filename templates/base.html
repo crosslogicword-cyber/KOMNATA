@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Komnata</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <h1>Komnata</h1>
+            <p>Magazynowanie produktów według sektorów, regałów i własnych układów miejsc</p>
+        </div>
+        <nav>
+            <a href="{{ url_for('dashboard') }}">Panel</a>
+            <a href="{{ url_for('storage_map') }}">Regały</a>
+            <a href="{{ url_for('search') }}">Wyszukiwarka</a>
+            <a href="{{ url_for('settings') }}">Ustawienia</a>
+            <a href="{{ url_for('print_view') }}" target="_blank">Wydruk</a>
+        </nav>
+        {% if latest_system_activity %}
+        <div class="system-meta">Ostatnia modyfikacja: {{ latest_system_activity }}</div>
+        {% endif %}
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="flashes">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
