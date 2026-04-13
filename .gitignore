@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+backup_komnata.db
+backup_komnata.dbsqlite3
