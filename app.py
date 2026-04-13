@@ -453,7 +453,7 @@ def dashboard():
     return render_template(
         'dashboard.html',
         sectors=fetch_sectors(),
-        racks=fetch_racks(only_main_racks=True),
+        racks=fetch_racks(),
         grouped=grouped,
         selected_sector=selected_sector,
         selected_rack=selected_rack,
@@ -566,7 +566,7 @@ def edit_item(item_id):
         'item_form.html',
         item=item,
         sectors=fetch_sectors(),
-        racks=fetch_racks(only_main_racks=True),
+        racks=fetch_racks(),
         slots_by_rack=fetch_slots_by_rack(),
         mode=mode,
     )
@@ -641,7 +641,7 @@ def storage_map():
         'storage.html',
         grouped=grouped,
         sectors=fetch_sectors(),
-        racks=fetch_racks(only_main_racks=True),
+        racks=fetch_racks(),
         selected_sector=selected_sector,
         selected_rack=selected_rack,
         selected_slot=selected_slot,
