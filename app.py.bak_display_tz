@@ -185,7 +185,7 @@ def item_base_select():
                items.extra_field,
                items.created_at,
                COALESCE(items.updated_at, items.created_at) AS updated_at,
-               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
+               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at)) AS updated_at_display,
                items.sector_id,
                items.rack_id,
                items.slot_id,
@@ -209,7 +209,7 @@ def record_item_history(conn: sqlite3.Connection, item_id: int | None, action: s
 def get_latest_system_activity():
     with closing(get_db()) as conn:
         row = conn.execute(
-            "SELECT strftime('%d.%m.%Y %H:%M', changed_at, '+2 hours') AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
+            "SELECT strftime('%d.%m.%Y %H:%M', changed_at) AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
         ).fetchone()
     return row['changed_at_display'] if row and row['changed_at_display'] else None
 

@@ -49,3 +49,6 @@ Railway ma oficjalny przewodnik dla Flask, obsługuje wdrożenie z GitHub, start
 - historia zmian,
 - osobne poziomy: podłoga / półka / pojemnik,
 - API do integracji z innym systemem.
+
+
+Aktualizacja: własne układy regałów zapisane i przypisane w Ustawieniach są widoczne także w Panelu przy dodawaniu oraz edycji produktu.

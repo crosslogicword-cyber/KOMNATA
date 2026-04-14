@@ -1,13 +1,6 @@
 from datetime import datetime, timedelta, timezone
 APP_TZ = timezone(timedelta(hours=2))
 
-
-def now_local_str():
-    return datetime.now(APP_TZ).strftime('%Y-%m-%d %H:%M:%S')
-
-def now_local_display():
-    return datetime.now(APP_TZ).strftime('%d.%m.%Y %H:%M')
-
 import os
 import re
 import sqlite3
@@ -185,7 +178,7 @@ def item_base_select():
                items.extra_field,
                items.created_at,
                COALESCE(items.updated_at, items.created_at) AS updated_at,
-               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
+               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at)) AS updated_at_display,
                items.sector_id,
                items.rack_id,
                items.slot_id,
@@ -209,7 +202,7 @@ def record_item_history(conn: sqlite3.Connection, item_id: int | None, action: s
 def get_latest_system_activity():
     with closing(get_db()) as conn:
         row = conn.execute(
-            "SELECT strftime('%d.%m.%Y %H:%M', changed_at, '+2 hours') AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
+            "SELECT strftime('%d.%m.%Y %H:%M', changed_at) AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
         ).fetchone()
     return row['changed_at_display'] if row and row['changed_at_display'] else None
 
@@ -535,7 +528,7 @@ def edit_item(item_id):
                 flash(error, 'error')
                 return redirect(url_for('edit_item', item_id=item_id, mode=mode))
 
-            old_location = f"{item['sector_name']} / {item['rack_name']} / {item['slot_code'] or '-'}"
+            old_location = f"{item['rack_name'] or ''}{' / ' if item['rack_name'] and item['slot_code'] else ''}{item['slot_code'] or ''}"
             new_sector_name = conn.execute("SELECT CASE WHEN name = ? THEN '-' ELSE name END AS name FROM sectors WHERE id = ?", (OPTIONAL_SECTOR_NAME, sector_id_resolved)).fetchone()['name']
             new_rack_name = conn.execute("SELECT CASE WHEN name = ? THEN '-' ELSE name END AS name FROM racks WHERE id = ?", (OPTIONAL_RACK_NAME, rack_id_resolved)).fetchone()['name']
             new_slot_name = '-'

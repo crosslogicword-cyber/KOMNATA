@@ -32,13 +32,11 @@
                 <div id="rack-fields-wrapper" style="display:block; margin-top:8px;">
                     <label>Regał <span class="muted">(opcjonalnie)</span>
                         <select name="rack_id" id="rack-select">
-  <option value="">Bez regału</option>
-  {% for rack in racks %}
-    {% if rack.name != 'Bez regału' %}
-      <option value="{{ rack.id }}">{{ rack.name }}</option>
-    {% endif %}
-  {% endfor %}
-</select>
+                            <option value="">Bez regału</option>
+                            {% for rack in racks %}
+                            <option value="{{ rack.id }}">{{ rack.name }}</option>
+                            {% endfor %}
+                        </select>
                     </label>
                     <label>Miejsce w regale
                         <select name="slot_id" id="slot-select">
@@ -76,11 +74,9 @@
             <label>Miejsce
                 <select name="slot">
                     <option value="">Wszystkie miejsca</option>
-                    {% for rack in racks %}
-    {% if rack.name != 'Bez regału' %}
-      <option value="{{ rack.id }}">{{ rack.name }}</option>
-    {% endif %}
-  {% endfor %}
+                    {% for code in all_slot_codes %}
+                    <option value="{{ code }}" {% if selected_slot == code %}selected{% endif %}>{{ code }}</option>
+                    {% endfor %}
                 </select>
             </label>
             <button type="submit">Pokaż</button>
@@ -136,23 +132,6 @@
 const rackSelect = document.getElementById('rack-select');
 const slotSelect = document.getElementById('slot-select');
 const slotsByRack = {{ slots_by_rack | tojson }};
-const lastRackKey = 'komnata_last_rack_id';
-
-function pinLastRackToTop() {
-  const saved = localStorage.getItem(lastRackKey);
-  if (!saved || !rackSelect) return;
-
-  const options = Array.from(rackSelect.options);
-  const target = options.find(o => String(o.value).trim() === String(saved).trim());
-  if (!target) return;
-
-  const placeholder = options.find(o => String(o.value).trim() === '');
-  if (!placeholder || target === placeholder) return;
-
-  rackSelect.removeChild(target);
-  placeholder.insertAdjacentElement('afterend', target);
-  rackSelect.value = saved;
-}
 
 function refreshSlotOptions() {
   const rackId = rackSelect.value;
@@ -165,15 +144,7 @@ function refreshSlotOptions() {
     slots.map(slot => `<option value="${slot.id}">${slot.code}</option>`).join('');
 }
 
-rackSelect.addEventListener('change', function () {
-  if (rackSelect.value) {
-    localStorage.setItem(lastRackKey, rackSelect.value);
-    pinLastRackToTop();
-  }
-  refreshSlotOptions();
-});
-
-pinLastRackToTop();
+rackSelect.addEventListener('change', refreshSlotOptions);
 refreshSlotOptions();
 
 const useSectorCheckbox = document.getElementById('use-sector-checkbox');
