@@ -1,0 +1,63 @@
+DROP TABLE IF EXISTS item_history CASCADE;
+DROP TABLE IF EXISTS layouts CASCADE;
+DROP TABLE IF EXISTS rack_slots CASCADE;
+DROP TABLE IF EXISTS items CASCADE;
+DROP TABLE IF EXISTS racks CASCADE;
+DROP TABLE IF EXISTS sectors CASCADE;
+
+CREATE TABLE sectors (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE racks (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    layout_id BIGINT
+);
+
+CREATE TABLE items (
+    id BIGSERIAL PRIMARY KEY,
+    product_name TEXT NOT NULL,
+    quantity TEXT,
+    notes TEXT,
+    sector_id BIGINT NOT NULL REFERENCES sectors(id),
+    rack_id BIGINT NOT NULL REFERENCES racks(id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    slot_id BIGINT,
+    extra_field TEXT,
+    updated_at TIMESTAMP
+);
+
+CREATE TABLE rack_slots (
+    id BIGSERIAL PRIMARY KEY,
+    rack_id BIGINT NOT NULL REFERENCES racks(id) ON DELETE CASCADE,
+    code TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(rack_id, code)
+);
+
+CREATE TABLE layouts (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    start_number INTEGER NOT NULL,
+    end_number INTEGER NOT NULL,
+    letters TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE item_history (
+    id BIGSERIAL PRIMARY KEY,
+    item_id BIGINT,
+    action TEXT NOT NULL,
+    details TEXT,
+    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
