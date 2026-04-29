@@ -21,16 +21,6 @@
       <a href="{{ url_for('backup_now') }}">Export danych do Excel</a>
               <a href="{{ url_for('import_excel') }}">Import Excel</a>
     </nav>
-
-    {% if system_status is defined %}
-    <div style="margin:10px 0 0 0;font-size:13px;color:#d1d5db;display:flex;gap:14px;flex-wrap:wrap;">
-      <span>Neon: <strong>{{ 'OK' if system_status.neon_ok else 'BŁĄD' }}</strong></span>
-      <span>Excel: <strong>{{ 'OK' if system_status.excel_ok else 'BRAK' }}</strong></span>
-      <span>Ostatni export: <strong>{{ system_status.last_export or '-' }}</strong></span>
-      <span>Ostatnia kopia: <strong>{{ system_status.last_backup or '-' }}</strong></span>
-    </div>
-    {% endif %}
-
         {% if latest_system_activity %}
         <div class="system-meta">Ostatnia modyfikacja: {{ latest_system_activity }}</div>
         {% endif %}

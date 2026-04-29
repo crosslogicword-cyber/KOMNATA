@@ -1,4 +1,3 @@
-import glob
 from openpyxl import load_workbook
 from openpyxl import Workbook
 from io import BytesIO
@@ -465,55 +464,6 @@ def inject_recent_items():
     return {"recent_items": recent_items}
 
 
-
-@app.context_processor
-def inject_system_status():
-    neon_ok = False
-    excel_ok = False
-    last_export = ''
-    last_backup = ''
-
-    try:
-        with closing(get_db()) as conn:
-            conn.execute("SELECT 1").fetchone()
-        neon_ok = True
-    except Exception:
-        neon_ok = False
-
-    try:
-        excel_ok = os.path.exists('komnata_auto_export.xlsx')
-    except Exception:
-        excel_ok = False
-
-    try:
-        export_candidates = []
-        if os.path.exists('komnata_auto_export.xlsx'):
-            export_candidates.append('komnata_auto_export.xlsx')
-        export_candidates.extend(glob.glob('komnata_export_*.xlsx'))
-        if export_candidates:
-            latest_export = max(export_candidates, key=lambda p: os.path.getmtime(p))
-            last_export = datetime.fromtimestamp(os.path.getmtime(latest_export)).strftime('%d.%m.%Y %H:%M')
-    except Exception:
-        last_export = ''
-
-    try:
-        backup_candidates = glob.glob('komnata_backup_*.xlsx')
-        if backup_candidates:
-            latest_backup = max(backup_candidates, key=lambda p: os.path.getmtime(p))
-            last_backup = datetime.fromtimestamp(os.path.getmtime(latest_backup)).strftime('%d.%m.%Y %H:%M')
-    except Exception:
-        last_backup = ''
-
-    return {
-        'system_status': {
-            'neon_ok': neon_ok,
-            'excel_ok': excel_ok,
-            'last_export': last_export,
-            'last_backup': last_backup,
-        }
-    }
-
-
 @app.route('/')
 def dashboard():
     selected_sector = request.args.get('sector', '').strip()
@@ -630,7 +580,6 @@ def add_item():
 
             try:
                 save_products_excel_snapshot()
-                create_timestamped_excel_backup()
             except Exception:
                 pass
 
@@ -656,7 +605,6 @@ def add_item():
 
     try:
         save_products_excel_snapshot()
-        create_timestamped_excel_backup()
     except Exception:
         pass
 
@@ -1066,19 +1014,6 @@ def save_products_excel_snapshot():
 
 
 
-
-
-def create_timestamped_excel_backup():
-    try:
-        save_products_excel_snapshot()
-        source = 'komnata_auto_export.xlsx'
-        target = 'komnata_backup.xlsx'
-        with open(source, 'rb') as src:
-            data = src.read()
-        with open(target, 'wb') as dst:
-            dst.write(data)
-    except Exception:
-        pass
 
 @app.route('/export/backup-now')
 def backup_now():

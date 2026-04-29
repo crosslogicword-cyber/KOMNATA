@@ -1,47 +1,46 @@
 <!doctype html>
 <html lang="pl">
 <head>
-    <meta charset="utf-8">
-    <title>Komnata - wydruk</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-        h1 { margin-bottom: 8px; }
-        .location { margin: 24px 0; page-break-inside: avoid; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-        th { background: #f3f4f6; }
-        .small { font-size: 12px; color: #6b7280; }
-        @media print { .no-print { display: none; } }
-    </style>
+  <meta charset="utf-8">
+  <title>Komnata — wydruk</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 6px 0; }
+    .muted { color: #666; margin-bottom: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; vertical-align: top; text-align: left; }
+    th { background: #f3f4f6; }
+    @media print {
+      body { margin: 0; }
+      a { text-decoration: none; color: inherit; }
+    }
+  </style>
 </head>
 <body>
-    <button class="no-print" onclick="window.print()">Drukuj</button>
-    <h1>Komnata — zestawienie lokalizacji</h1>
-    <p class="small">Sortowanie: według czasu dodania, od najwcześniejszego do najpóźniejszego.</p>
-    {% for location, items in grouped %}
-    <div class="location">
-        <h2>{{ location[0] }} / {{ location[1] }} / {{ location[2] }}</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Produkt</th>
-                    <th>Ilość</th>
-                    <th>Notatki</th>
-                    <th>Dodano</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in items %}
-                <tr>
-                    <td>{{ item.product_name }}</td>
-                    <td>{{ item.quantity or '-' }}</td>
-                    <td>{{ item.notes or '-' }}</td>
-                    <td>{{ item.created_at }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% endfor %}
+  <h1>Komnata — zestawienie lokalizacji</h1>
+  <div class="muted">Sortowanie: od najnowszych do najstarszych.</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Produkt</th>
+        <th>Lokalizacja</th>
+        <th>Ilość</th>
+        <th>Notatki</th>
+        <th>Dodano / zmieniono</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.product_name }}</td>
+        <td>{{ item.sector_name or '-' }} / {{ item.rack_name or '-' }}{% if item.slot_code %} / {{ item.slot_code }}{% endif %}</td>
+        <td>{{ item.quantity or '-' }}</td>
+        <td>{{ item.notes or '-' }}</td>
+        <td>{{ item.added_display or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </body>
 </html>

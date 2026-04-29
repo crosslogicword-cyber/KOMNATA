@@ -208,35 +208,4 @@ function refreshRackVisibility() {
 useRackCheckbox.addEventListener('change', refreshRackVisibility);
 refreshRackVisibility();
 </script>
-
-<section class="card">
-  <h2>Ostatnio dodane</h2>
-  {% if recent_items %}
-  <table>
-    <thead>
-      <tr>
-        <th>Produkt</th>
-        <th>Lokalizacja</th>
-        <th>Ilość</th>
-        <th>Notatki</th>
-        <th>Ostatnia zmiana</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in recent_items %}
-      <tr>
-        <td>{{ item.product_name }}</td>
-        <td>{{ item.sector_name or '-' }} / {{ item.rack_name or '-' }}{% if item.slot_code %} / {{ item.slot_code }}{% endif %}</td>
-        <td>{{ item.quantity or '-' }}</td>
-        <td>{{ item.notes or '-' }}</td>
-        <td>{{ item.changed_display or '-' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p>Brak ostatnio dodanych produktów.</p>
-  {% endif %}
-</section>
-
 {% endblock %}

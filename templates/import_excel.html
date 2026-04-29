@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Import Excel</h2>
+  <form method="post" enctype="multipart/form-data" class="form-grid">
+    <label class="full">Plik Excel
+      <input type="file" name="excel_file" accept=".xlsx" required>
+    </label>
+    <button type="submit">Importuj</button>
+  </form>
+  <p class="muted">Wymagany arkusz: <strong>Produkty</strong>. Kolumny: Produkt, Ilość, Notatki, Sektor, Regał, Miejsce.</p>
+</section>
+{% endblock %}

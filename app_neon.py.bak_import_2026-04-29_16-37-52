@@ -1,5 +1,3 @@
-import glob
-from openpyxl import load_workbook
 from openpyxl import Workbook
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
@@ -17,7 +15,6 @@ import re
 import sqlite3
 from contextlib import closing
 from difflib import SequenceMatcher
-from werkzeug.utils import secure_filename
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for, send_file
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -465,55 +462,6 @@ def inject_recent_items():
     return {"recent_items": recent_items}
 
 
-
-@app.context_processor
-def inject_system_status():
-    neon_ok = False
-    excel_ok = False
-    last_export = ''
-    last_backup = ''
-
-    try:
-        with closing(get_db()) as conn:
-            conn.execute("SELECT 1").fetchone()
-        neon_ok = True
-    except Exception:
-        neon_ok = False
-
-    try:
-        excel_ok = os.path.exists('komnata_auto_export.xlsx')
-    except Exception:
-        excel_ok = False
-
-    try:
-        export_candidates = []
-        if os.path.exists('komnata_auto_export.xlsx'):
-            export_candidates.append('komnata_auto_export.xlsx')
-        export_candidates.extend(glob.glob('komnata_export_*.xlsx'))
-        if export_candidates:
-            latest_export = max(export_candidates, key=lambda p: os.path.getmtime(p))
-            last_export = datetime.fromtimestamp(os.path.getmtime(latest_export)).strftime('%d.%m.%Y %H:%M')
-    except Exception:
-        last_export = ''
-
-    try:
-        backup_candidates = glob.glob('komnata_backup_*.xlsx')
-        if backup_candidates:
-            latest_backup = max(backup_candidates, key=lambda p: os.path.getmtime(p))
-            last_backup = datetime.fromtimestamp(os.path.getmtime(latest_backup)).strftime('%d.%m.%Y %H:%M')
-    except Exception:
-        last_backup = ''
-
-    return {
-        'system_status': {
-            'neon_ok': neon_ok,
-            'excel_ok': excel_ok,
-            'last_export': last_export,
-            'last_backup': last_backup,
-        }
-    }
-
-
 @app.route('/')
 def dashboard():
     selected_sector = request.args.get('sector', '').strip()
@@ -630,7 +578,6 @@ def add_item():
 
             try:
                 save_products_excel_snapshot()
-                create_timestamped_excel_backup()
             except Exception:
                 pass
 
@@ -656,7 +603,6 @@ def add_item():
 
     try:
         save_products_excel_snapshot()
-        create_timestamped_excel_backup()
     except Exception:
         pass
 
@@ -1067,25 +1013,12 @@ def save_products_excel_snapshot():
 
 
 
-
-def create_timestamped_excel_backup():
-    try:
-        save_products_excel_snapshot()
-        source = 'komnata_auto_export.xlsx'
-        target = 'komnata_backup.xlsx'
-        with open(source, 'rb') as src:
-            data = src.read()
-        with open(target, 'wb') as dst:
-            dst.write(data)
-    except Exception:
-        pass
-
 @app.route('/export/backup-now')
 def backup_now():
     save_products_excel_snapshot()
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     source = 'komnata_auto_export.xlsx'
-    target = f'komnata_export_{timestamp}.xlsx'
+    target = f'komnata_backup_{timestamp}.xlsx'
 
     with open(source, 'rb') as src:
         data = src.read()
@@ -1237,139 +1170,6 @@ def export_excel():
         download_name='komnata_export.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-
-
-
-@app.route('/import/excel', methods=['GET', 'POST'])
-def import_excel():
-    if request.method == 'POST':
-        file = request.files.get('excel_file')
-        if not file or not file.filename:
-            flash('Wybierz plik Excel.', 'error')
-            return redirect(url_for('import_excel'))
-
-        filename = secure_filename(file.filename or 'import.xlsx')
-        temp_path = f"_tmp_{filename}"
-        file.save(temp_path)
-
-        imported = 0
-        skipped = 0
-
-        try:
-            wb = load_workbook(temp_path, data_only=True)
-            if 'Produkty' not in wb.sheetnames:
-                flash('Plik nie zawiera arkusza „Produkty”.', 'error')
-                return redirect(url_for('import_excel'))
-
-            ws = wb['Produkty']
-            rows = list(ws.iter_rows(values_only=True))
-            if not rows:
-                flash('Arkusz „Produkty” jest pusty.', 'error')
-                return redirect(url_for('import_excel'))
-
-            headers = [str(h).strip() if h is not None else '' for h in rows[0]]
-            index = {name: i for i, name in enumerate(headers)}
-
-            def val(row, name, default=''):
-                i = index.get(name)
-                if i is None or i >= len(row):
-                    return default
-                return row[i] if row[i] is not None else default
-
-            with closing(get_db()) as conn:
-                for row in rows[1:]:
-                    product_name = str(val(row, 'Produkt', '')).strip()
-                    quantity = str(val(row, 'Ilość', '')).strip()
-                    notes = str(val(row, 'Notatki', '')).strip()
-                    sector_name = str(val(row, 'Sektor', '')).strip()
-                    rack_name = str(val(row, 'Regał', '')).strip()
-                    slot_code = str(val(row, 'Miejsce', '')).strip()
-
-                    if not product_name:
-                        skipped += 1
-                        continue
-
-                    if not sector_name or sector_name == '-':
-                        sector_name = OPTIONAL_SECTOR_NAME
-                    if not rack_name or rack_name == '-':
-                        rack_name = OPTIONAL_RACK_NAME
-
-                    sector = conn.execute(
-                        "SELECT id FROM sectors WHERE name = ? LIMIT 1",
-                        (sector_name,)
-                    ).fetchone()
-                    if not sector:
-                        sector = conn.execute(
-                            "INSERT INTO sectors(name, is_active) VALUES (?, 1) RETURNING id",
-                            (sector_name,)
-                        ).fetchone()
-
-                    rack = conn.execute(
-                        "SELECT id FROM racks WHERE name = ? LIMIT 1",
-                        (rack_name,)
-                    ).fetchone()
-                    if not rack:
-                        rack = conn.execute(
-                            "INSERT INTO racks(name, is_active) VALUES (?, 1) RETURNING id",
-                            (rack_name,)
-                        ).fetchone()
-
-                    slot_id = None
-                    if slot_code:
-                        slot = conn.execute(
-                            "SELECT id FROM rack_slots WHERE rack_id = ? AND code = ? LIMIT 1",
-                            (rack['id'], slot_code)
-                        ).fetchone()
-                        if not slot:
-                            slot = conn.execute(
-                                "INSERT INTO rack_slots(rack_id, code, is_active, sort_order) VALUES (?, ?, 1, 0) RETURNING id",
-                                (rack['id'], slot_code)
-                            ).fetchone()
-                        slot_id = slot['id']
-
-                    duplicate = conn.execute(
-                        '''
-                        SELECT id FROM items
-                        WHERE lower(product_name) = lower(?)
-                          AND sector_id = ?
-                          AND rack_id = ?
-                          AND COALESCE(slot_id, 0) = COALESCE(?, 0)
-                        LIMIT 1
-                        ''',
-                        (product_name, sector['id'], rack['id'], slot_id)
-                    ).fetchone()
-
-                    if duplicate:
-                        skipped += 1
-                        continue
-
-                    conn.execute(
-                        '''
-                        INSERT INTO items(product_name, quantity, notes, extra_field, sector_id, rack_id, slot_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''',
-                        (product_name, quantity, notes, '', sector['id'], rack['id'], slot_id)
-                    )
-
-                    imported += 1
-
-                conn.commit()
-
-            try:
-                save_products_excel_snapshot()
-            except Exception:
-                pass
-
-            flash(f'Import zakończony. Dodano: {imported}, pominięto: {skipped}.', 'success')
-            return redirect(url_for('import_excel'))
-
-        finally:
-            try:
-                Path(temp_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-
-    return render_template('import_excel.html')
 
 
 if __name__ == '__main__':
