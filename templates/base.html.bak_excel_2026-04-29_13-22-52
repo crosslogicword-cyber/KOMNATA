@@ -18,7 +18,6 @@
             <a href="{{ url_for('search') }}">Wyszukiwarka</a>
             <a href="{{ url_for('settings') }}">Ustawienia</a>
             <a href="{{ url_for('print_view') }}" target="_blank">Wydruk</a>
-      <a href="{{ url_for('export_excel') }}">Excel</a>
         </nav>
         {% if latest_system_activity %}
         <div class="system-meta">Ostatnia modyfikacja: {{ latest_system_activity }}</div>

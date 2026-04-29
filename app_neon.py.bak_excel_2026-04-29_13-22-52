@@ -1,5 +1,3 @@
-from openpyxl import Workbook
-from io import BytesIO
 from datetime import datetime, timedelta, timezone
 APP_TZ = timezone(timedelta(hours=2))
 
@@ -15,7 +13,7 @@ import re
 import sqlite3
 from contextlib import closing
 from difflib import SequenceMatcher
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for, send_file
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, url_for
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'komnata.db')
@@ -779,135 +777,6 @@ def settings():
         slot_counts=fetch_slot_counts(),
         slot_codes_default=build_slot_codes(0, 5, 'A,B'),
         slot_codes_c=build_slot_codes(0, 5, 'C'),
-    )
-
-
-
-@app.route('/export/excel')
-def export_excel():
-    wb = Workbook()
-
-    def write_sheet(ws, title, rows):
-        ws.title = title
-        rows = list(rows)
-        if not rows:
-            ws.append(['Brak danych'])
-            return
-
-        def row_to_dict(row):
-            if hasattr(row, 'keys'):
-                return {key: row[key] for key in row.keys()}
-            if isinstance(row, dict):
-                return row
-            return dict(row)
-
-        first = row_to_dict(rows[0])
-        headers = list(first.keys())
-        ws.append(headers)
-
-        for row in rows:
-            row_dict = row_to_dict(row)
-            ws.append([row_dict[h] if h in row_dict else None for h in headers])
-
-    with closing(get_db()) as conn:
-        products = conn.execute(
-            '''
-            SELECT
-                items.id,
-                items.product_name,
-                items.quantity,
-                items.notes,
-                items.extra_field,
-                items.created_at,
-                items.updated_at,
-                CASE WHEN sectors.name = ? THEN '' ELSE sectors.name END AS sector_name,
-                CASE WHEN racks.name = ? THEN '' ELSE racks.name END AS rack_name,
-                COALESCE(rack_slots.code, '') AS slot_code
-            FROM items
-            JOIN sectors ON sectors.id = items.sector_id
-            JOIN racks ON racks.id = items.rack_id
-            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
-            ORDER BY items.id DESC
-            ''',
-            (OPTIONAL_SECTOR_NAME, OPTIONAL_RACK_NAME)
-        ).fetchall()
-
-        sectors = conn.execute(
-            "SELECT id, name, is_active, created_at FROM sectors ORDER BY name"
-        ).fetchall()
-
-        racks = conn.execute(
-            '''
-            SELECT
-                racks.id,
-                racks.name,
-                racks.is_active,
-                racks.created_at,
-                racks.layout_id,
-                COALESCE(layouts.name, '') AS layout_name
-            FROM racks
-            LEFT JOIN layouts ON layouts.id = racks.layout_id
-            ORDER BY racks.name
-            '''
-        ).fetchall()
-
-        layouts = conn.execute(
-            '''
-            SELECT
-                id, name, start_number, end_number, letters, description, is_active, created_at
-            FROM layouts
-            ORDER BY name
-            '''
-        ).fetchall()
-
-        slots = conn.execute(
-            '''
-            SELECT
-                rack_slots.id,
-                rack_slots.rack_id,
-                racks.name AS rack_name,
-                rack_slots.code,
-                rack_slots.sort_order,
-                rack_slots.is_active,
-                rack_slots.created_at
-            FROM rack_slots
-            JOIN racks ON racks.id = rack_slots.rack_id
-            ORDER BY racks.name, rack_slots.sort_order, rack_slots.code
-            '''
-        ).fetchall()
-
-        history = conn.execute(
-            '''
-            SELECT
-                item_history.id,
-                item_history.item_id,
-                item_history.action,
-                item_history.details,
-                item_history.changed_at,
-                COALESCE(items.product_name, '') AS product_name
-            FROM item_history
-            LEFT JOIN items ON items.id = item_history.item_id
-            ORDER BY item_history.id DESC
-            '''
-        ).fetchall()
-
-    ws = wb.active
-    write_sheet(ws, 'Produkty', products)
-    write_sheet(wb.create_sheet(), 'Sektory', sectors)
-    write_sheet(wb.create_sheet(), 'Regały', racks)
-    write_sheet(wb.create_sheet(), 'Układy', layouts)
-    write_sheet(wb.create_sheet(), 'Miejsca', slots)
-    write_sheet(wb.create_sheet(), 'Historia', history)
-
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name='komnata_export.xlsx',
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
 
 
