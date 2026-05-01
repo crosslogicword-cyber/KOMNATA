@@ -542,18 +542,6 @@ def dashboard():
         racks = fetch_racks(active_only=True)
         slot_counts = fetch_slot_counts()
 
-        last_added_row = conn.execute(
-            '''
-            SELECT rack_id, slot_id
-            FROM items
-            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
-            LIMIT 1
-            '''
-        ).fetchone()
-
-        add_selected_rack_id = str(last_added_row['rack_id']) if last_added_row and last_added_row['rack_id'] is not None else ''
-        add_selected_slot_id = str(last_added_row['slot_id']) if last_added_row and last_added_row['slot_id'] is not None else ''
-
         rack_slots_all = conn.execute(
             '''
             SELECT
@@ -630,8 +618,6 @@ def dashboard():
         selected_sector_id=sector_filter,
         selected_rack_id=rack_filter,
         selected_slot_id=slot_filter,
-        add_selected_rack_id=add_selected_rack_id,
-        add_selected_slot_id=add_selected_slot_id,
         slots_by_rack=slots_by_rack,
     )
 

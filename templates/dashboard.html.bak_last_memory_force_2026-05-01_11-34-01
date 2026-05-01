@@ -1,0 +1,333 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid">
+    <section class="card">
+        <h2>Dodaj produkt</h2>
+        <form method="post" action="{{ url_for('add_item') }}" class="form-grid">
+            <label>Nazwa produktu
+                <input type="text" name="product_name" list="product-name-list" placeholder="np. Farba akrylowa" required>
+            </label>
+            <label>Ilość / opis ilości
+                <input type="text" name="quantity" placeholder="np. 3 szt., 1 karton">
+            </label>
+            <div class="sector-toggle-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="use-sector-checkbox">
+                    Użyj sektora
+                </label>
+                <label id="sector-field-wrapper" style="display:none; margin-top:8px;">Sektor <span class="muted">(opcjonalnie)</span>
+                    <select name="sector_id" id="sector-select">
+                        <option value="">Bez sektora</option>
+                        {% for sector in sectors %}
+                        <option value="{{ sector.id }}">{{ sector.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="sector-toggle-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="use-rack-checkbox" checked>
+                    Użyj regału
+                </label>
+                <div id="rack-fields-wrapper" style="display:block; margin-top:8px;">
+                    <label>Regał <span class="muted">(opcjonalnie)</span>
+                        <select name="rack_id" id="rack-select">
+  <option value="">Bez regału</option>
+  {% for rack in racks %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
+</select>
+                    </label>
+                    <label>Miejsce w regale
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <label class="full">Notatki
+                <textarea name="notes" rows="3" placeholder="np. delikatne / data zakupu / dodatkowy opis"></textarea>
+            </label>
+            <button type="submit">Dodaj do Komnaty</button>
+          <datalist id="product-name-list"></datalist>
+</form>
+    </section>
+
+    <section class="card">
+        <h2>Filtr podglądu</h2>
+        <form method="get" action="{{ url_for('dashboard') }}" class="form-grid">
+            <label>Sektor
+                <select name="sector_id" id="filter-sector">
+                    <option value="">Wszystkie sektory</option>
+                    {% for sector in sectors %}
+                    <option value="{{ sector.id }}" {% if selected_sector_id|string == sector.id|string %}selected{% endif %}>{{ sector.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Regał
+                <select name="rack_id" id="filter-rack">
+                    <option value="">Wszystkie regały</option>
+                    {% for rack in racks %}
+                    <option value="{{ rack.id }}" {% if selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Miejsce
+          <select name="slot_id" id="filter-slot">
+            <option value="">Wszystkie miejsca</option>
+            {% if selected_rack_id and slots_by_rack.get(selected_rack_id|string) %}
+              {% for slot in slots_by_rack.get(selected_rack_id|string, []) %}
+              <option value="{{ slot.id }}" {% if selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </label>
+            <button type="submit">Pokaż</button>
+        </form>
+        <p class="muted">Rzecz możesz zapisać jako: tylko sektor, tylko regał + miejsce albo pełny adres sektor + regał + miejsce.</p>
+    </section>
+</div>
+
+<section class="card">
+    <div class="section-row">
+        <h2>Zawartość według lokalizacji</h2>
+        <a class="button-secondary" href="{{ url_for('print_view') }}" target="_blank">Wersja do wydruku</a>
+    </div>
+    {% if grouped %}
+        {% for (sector_name, rack_name, slot_code), items in grouped.items() %}
+        <div class="location-block">
+            <h3>{{ sector_name }} / {{ rack_name }} / {{ slot_code }}</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Produkt</th>
+                        <th>Ilość</th>
+                        <th>Notatki</th>
+                        <th>Ostatnia zmiana</th>
+                        <th>Akcja</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.product_name }}</td>
+                        <td>{{ item.quantity or '-' }}</td>
+                        <td>{{ item.notes or '-' }}</td>
+                        <td>{{ item.updated_at_display }}</td>
+                        <td class="actions-cell">
+                            <a class="button-inline" href="{{ url_for('edit_item', item_id=item.id) }}">Edytuj</a>
+                            <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}" onsubmit="return confirm('Usunąć tę pozycję?');">
+                                <button class="danger" type="submit">Usuń</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>Brak pozycji dla wybranego widoku.</p>
+    {% endif %}
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const rackSelect = document.getElementById('rack-select');
+  const slotSelect = document.getElementById('slot-select');
+  const filterRack = document.getElementById('filter-rack');
+  const filterSlot = document.getElementById('filter-slot');
+  const slotsByRack = {{ slots_by_rack | tojson }};
+
+  function fillSlots(selectEl, rackId, selectedValue) {
+    if (!selectEl) return;
+    const firstLabel = selectEl.id === 'filter-slot' ? 'Wszystkie miejsca' : 'Bez miejsca';
+    const slots = slotsByRack[String(rackId || '')] || [];
+    selectEl.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = firstLabel;
+    selectEl.appendChild(emptyOpt);
+
+    for (const slot of slots) {
+      const opt = document.createElement('option');
+      opt.value = String(slot.id);
+      opt.textContent = slot.code;
+      if (selectedValue && String(selectedValue) === String(slot.id)) {
+        opt.selected = true;
+      }
+      selectEl.appendChild(opt);
+    }
+  }
+
+  if (rackSelect && slotSelect) {
+    const selectedSlot = "{{ selected_slot_id or '' }}";
+    fillSlots(slotSelect, rackSelect.value, selectedSlot);
+    rackSelect.addEventListener('change', function () {
+      fillSlots(slotSelect, rackSelect.value, '');
+    });
+  }
+
+  if (filterRack && filterSlot) {
+    const selectedFilterSlot = "{{ selected_slot_id or '' }}";
+    fillSlots(filterSlot, filterRack.value, selectedFilterSlot);
+    filterRack.addEventListener('change', function () {
+      fillSlots(filterSlot, filterRack.value, '');
+    });
+  }
+});
+</script>
+
+<section class="card">
+  <h2>Ostatnio dodane</h2>
+  {% if recent_items %}
+  <table>
+    <thead>
+      <tr>
+        <th>Produkt</th>
+        <th>Lokalizacja</th>
+        <th>Ilość</th>
+        <th>Notatki</th>
+        <th>Ostatnia zmiana</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in recent_items %}
+      <tr>
+        <td>{{ item.product_name }}</td>
+        <td>{{ item.sector_name or '-' }} / {{ item.rack_name or '-' }}{% if item.slot_code %} / {{ item.slot_code }}{% endif %}</td>
+        <td>{{ item.quantity or '-' }}</td>
+        <td>{{ item.notes or '-' }}</td>
+        <td>{{ item.changed_display or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Brak ostatnio dodanych produktów.</p>
+  {% endif %}
+</section>
+
+{% endblock %}
+
+
+<!-- LAST_MEMORY_START -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const rackSelect = document.getElementById('rack-select');
+  const slotSelect = document.getElementById('slot-select');
+  const productInput = document.querySelector('input[name="product_name"]');
+  const productList = document.getElementById('product-name-list');
+  const form = productInput ? productInput.closest('form') : null;
+
+  const rackKey = 'komnata_last_rack_id';
+  const slotKey = 'komnata_last_slot_id';
+  const productKey = 'komnata_last_product_name';
+
+  function setIfExists(select, value) {
+    if (!select || !value) return false;
+    const opt = Array.from(select.options).find(o => String(o.value) === String(value));
+    if (!opt) return false;
+    select.value = String(value);
+    return true;
+  }
+
+  function refreshAddSlots(savedSlot) {
+    if (!rackSelect || !slotSelect) return;
+    const slotsByRack = window.slotsByRack || {};
+    const rackId = String(rackSelect.value || '');
+    const slots = slotsByRack[rackId] || [];
+
+    const current = savedSlot || localStorage.getItem(slotKey) || '';
+    slotSelect.innerHTML = '';
+    const emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = 'Bez miejsca';
+    slotSelect.appendChild(emptyOpt);
+
+    for (const slot of slots) {
+      const opt = document.createElement('option');
+      opt.value = String(slot.id);
+      opt.textContent = slot.code;
+      if (String(current) === String(slot.id)) {
+        opt.selected = true;
+      }
+      slotSelect.appendChild(opt);
+    }
+  }
+
+  if (typeof slotsByRack !== 'undefined') {
+    window.slotsByRack = slotsByRack;
+  }
+
+  // Regał
+  if (rackSelect) {
+    const savedRack = localStorage.getItem(rackKey);
+    if (savedRack) {
+      setIfExists(rackSelect, savedRack);
+    }
+  }
+
+  // Miejsce po regale
+  refreshAddSlots();
+
+  if (rackSelect) {
+    rackSelect.addEventListener('change', function () {
+      if (rackSelect.value) {
+        localStorage.setItem(rackKey, rackSelect.value);
+      } else {
+        localStorage.removeItem(rackKey);
+      }
+      localStorage.removeItem(slotKey);
+      refreshAddSlots('');
+    });
+  }
+
+  if (slotSelect) {
+    const savedSlot = localStorage.getItem(slotKey);
+    if (savedSlot) {
+      setIfExists(slotSelect, savedSlot);
+    }
+
+    slotSelect.addEventListener('change', function () {
+      if (slotSelect.value) {
+        localStorage.setItem(slotKey, slotSelect.value);
+      } else {
+        localStorage.removeItem(slotKey);
+      }
+    });
+  }
+
+  // Ostatni produkt jako podpowiedź
+  if (productInput && productList) {
+    const savedProduct = localStorage.getItem(productKey);
+    if (savedProduct) {
+      const opt = document.createElement('option');
+      opt.value = savedProduct;
+      productList.innerHTML = '';
+      productList.appendChild(opt);
+      if (!productInput.value) {
+        productInput.placeholder = 'Ostatnio: ' + savedProduct;
+      }
+    }
+  }
+
+  // Zapamiętaj po wysłaniu formularza
+  if (form) {
+    form.addEventListener('submit', function () {
+      if (productInput && productInput.value.trim()) {
+        localStorage.setItem(productKey, productInput.value.trim());
+      }
+      if (rackSelect && rackSelect.value) {
+        localStorage.setItem(rackKey, rackSelect.value);
+      }
+      if (slotSelect && slotSelect.value) {
+        localStorage.setItem(slotKey, slotSelect.value);
+      }
+    });
+  }
+});
+</script>
+<!-- LAST_MEMORY_END -->

@@ -34,22 +34,17 @@
                         <select name="rack_id" id="rack-select">
   <option value="">Bez regału</option>
   {% for rack in racks %}
-            {% if rack.name != 'Bez regału' %}
-            <option value="{{ rack.id }}" {% if add_selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
-            {% endif %}
-            {% endfor %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
 </select>
                     </label>
                     <label>Miejsce w regale
-            <select name="slot_id" id="slot-select">
-              <option value="">Bez miejsca</option>
-              {% if add_selected_rack_id and slots_by_rack.get(add_selected_rack_id|string) %}
-                {% for slot in slots_by_rack.get(add_selected_rack_id|string, []) %}
-                <option value="{{ slot.id }}" {% if add_selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
-                {% endfor %}
-              {% endif %}
-            </select>
-          </label>
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
                 </div>
             </div>
             <label class="full">Notatki
@@ -170,7 +165,7 @@ window.slotsByRack = slotsByRack;
   }
 
   if (rackSelect && slotSelect) {
-    const selectedSlot = "{{ add_selected_slot_id or '' }}";
+    const selectedSlot = "{{ selected_slot_id or '' }}";
     fillSlots(slotSelect, rackSelect.value, selectedSlot);
     rackSelect.addEventListener('change', function () {
       fillSlots(slotSelect, rackSelect.value, '');
@@ -578,70 +573,3 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 <!-- FINAL_MEMORY_HINTS_START -->
-
-
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const rackSelect = document.getElementById('rack-select');
-  const slotSelect = document.getElementById('slot-select');
-  const filterRack = document.getElementById('filter-rack');
-  const filterSlot = document.getElementById('filter-slot');
-  const slotsByRack = {{ slots_by_rack | tojson }};
-
-  function fillSlots(selectEl, rackId, selectedSlotId, emptyLabel) {
-    if (!selectEl) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
-    selectEl.innerHTML = '';
-
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = emptyLabel;
-    selectEl.appendChild(emptyOpt);
-
-    for (const slot of slots) {
-      const opt = document.createElement('option');
-      opt.value = String(slot.id);
-      opt.textContent = slot.code;
-      if (selectedSlotId && String(selectedSlotId) === String(slot.id)) {
-        opt.selected = true;
-      }
-      selectEl.appendChild(opt);
-    }
-  }
-
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const SERVER_SELECTED_SLOT = "{{ add_selected_slot_id or '' }}";
-
-  if (rackSelect && slotSelect) {
-    if (rackSelect.value) {
-      fillSlots(slotSelect, rackSelect.value, SERVER_SELECTED_SLOT, 'Bez miejsca');
-    }
-
-    rackSelect.addEventListener('change', function () {
-      localStorage.removeItem(LAST_SLOT_KEY);
-      fillSlots(slotSelect, rackSelect.value, '', 'Bez miejsca');
-    });
-
-    slotSelect.addEventListener('change', function () {
-      if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-
-    const addForm = rackSelect.closest('form');
-    if (addForm) {
-      addForm.addEventListener('submit', function () {
-        if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      });
-    }
-  }
-
-  if (filterRack && filterSlot) {
-    fillSlots(filterSlot, filterRack.value, "{{ selected_slot_id or '' }}", 'Wszystkie miejsca');
-    filterRack.addEventListener('change', function () {
-      fillSlots(filterSlot, filterRack.value, '', 'Wszystkie miejsca');
-    });
-  }
-});
-</script>
-

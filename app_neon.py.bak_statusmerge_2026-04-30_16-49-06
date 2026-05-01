@@ -468,171 +468,93 @@ def inject_recent_items():
 
 @app.context_processor
 def inject_system_status():
-    db_label = 'błąd'
-    db_ok = False
+    neon_ok = False
     excel_ok = False
-    last_modification = ''
     last_export = ''
+    last_backup = ''
 
     try:
         with closing(get_db()) as conn:
-            conn_type = type(conn).__module__.lower()
-
-            if 'psycopg' in conn_type or 'postgres' in conn_type:
-                db_label = 'Neon'
-                db_ok = True
-            elif 'sqlite' in conn_type:
-                db_label = 'lokalna SQLite'
-                db_ok = True
-            else:
-                db_label = 'nieznana'
-                db_ok = True
+            conn.execute("SELECT 1").fetchone()
+        neon_ok = True
     except Exception:
-        db_label = 'błąd'
-        db_ok = False
+        neon_ok = False
 
     try:
-        excel_ok = os.path.exists('komnata_auto_export.xlsx') or os.path.exists('komnata_backup.xlsx')
+        excel_ok = os.path.exists('komnata_auto_export.xlsx')
     except Exception:
         excel_ok = False
 
     try:
-        with closing(get_db()) as conn:
-            row = conn.execute(
-                '''
-                SELECT strftime('%d.%m.%Y %H:%M', MAX(COALESCE(updated_at, created_at)), '+2 hours') AS last_mod
-                FROM items
-                '''
-            ).fetchone()
-            if row:
-                if hasattr(row, 'keys'):
-                    last_modification = row['last_mod']
-                else:
-                    last_modification = row[0]
-    except Exception:
-        last_modification = ''
-
-    try:
-        export_candidates = glob.glob('komnata_export_*.xlsx')
+        export_candidates = []
+        if os.path.exists('komnata_auto_export.xlsx'):
+            export_candidates.append('komnata_auto_export.xlsx')
+        export_candidates.extend(glob.glob('komnata_export_*.xlsx'))
         if export_candidates:
             latest_export = max(export_candidates, key=lambda p: os.path.getmtime(p))
             last_export = datetime.fromtimestamp(os.path.getmtime(latest_export)).strftime('%d.%m.%Y %H:%M')
     except Exception:
         last_export = ''
 
+    try:
+        backup_candidates = glob.glob('komnata_backup_*.xlsx')
+        if backup_candidates:
+            latest_backup = max(backup_candidates, key=lambda p: os.path.getmtime(p))
+            last_backup = datetime.fromtimestamp(os.path.getmtime(latest_backup)).strftime('%d.%m.%Y %H:%M')
+    except Exception:
+        last_backup = ''
+
     return {
         'system_status': {
-            'db_label': db_label,
-            'db_ok': db_ok,
+            'neon_ok': neon_ok,
             'excel_ok': excel_ok,
-            'last_modification': last_modification,
             'last_export': last_export,
+            'last_backup': last_backup,
         }
     }
 
 
 @app.route('/')
 def dashboard():
-    sector_filter = request.args.get('sector_id', '').strip()
-    rack_filter = request.args.get('rack_id', '').strip()
-    slot_filter = request.args.get('slot_id', '').strip()
+    selected_sector = request.args.get('sector', '').strip()
+    selected_rack = request.args.get('rack', '').strip()
+    selected_slot = request.args.get('slot', '').strip()
+
+    conditions = []
+    params = []
+    if selected_sector:
+        conditions.append('sectors.name = ?')
+        params.append(selected_sector)
+    if selected_rack:
+        conditions.append('racks.name = ?')
+        params.append(selected_rack)
+    if selected_slot:
+        conditions.append('rack_slots.code = ?')
+        params.append(selected_slot)
+
+    query = item_base_select()
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    query += ' ORDER BY sectors.name COLLATE NOCASE, racks.name COLLATE NOCASE, rack_slots.code COLLATE NOCASE, items.created_at ASC, items.product_name COLLATE NOCASE'
 
     with closing(get_db()) as conn:
-        sectors = fetch_sectors(active_only=True)
-        racks = fetch_racks(active_only=True)
-        slot_counts = fetch_slot_counts()
-
-        last_added_row = conn.execute(
-            '''
-            SELECT rack_id, slot_id
-            FROM items
-            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
-            LIMIT 1
-            '''
-        ).fetchone()
-
-        add_selected_rack_id = str(last_added_row['rack_id']) if last_added_row and last_added_row['rack_id'] is not None else ''
-        add_selected_slot_id = str(last_added_row['slot_id']) if last_added_row and last_added_row['slot_id'] is not None else ''
-
-        rack_slots_all = conn.execute(
-            '''
-            SELECT
-                rack_slots.id,
-                rack_slots.rack_id,
-                rack_slots.code,
-                rack_slots.sort_order,
-                rack_slots.is_active
-            FROM rack_slots
-            WHERE rack_slots.is_active = 1
-            ORDER BY rack_slots.rack_id, rack_slots.sort_order, rack_slots.code
-            '''
-        ).fetchall()
-
-        slots_by_rack = {}
-        for row in rack_slots_all:
-            rack_key = str(row['rack_id'])
-            slots_by_rack.setdefault(rack_key, []).append({
-                'id': row['id'],
-                'code': row['code']
-            })
-
-        query = '''
-            SELECT
-                items.id,
-                items.product_name,
-                items.quantity,
-                items.notes,
-                items.extra_field,
-                CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector_name,
-                CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack_name,
-                COALESCE(rack_slots.code, '') AS slot_code,
-                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
-                COALESCE(items.updated_at, items.created_at) AS sort_ts
-            FROM items
-            JOIN sectors ON sectors.id = items.sector_id
-            JOIN racks ON racks.id = items.rack_id
-            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
-            WHERE 1=1
-        '''
-        params = [OPTIONAL_SECTOR_NAME, OPTIONAL_RACK_NAME]
-
-        if sector_filter:
-            query += " AND items.sector_id = ?"
-            params.append(sector_filter)
-
-        if rack_filter:
-            query += " AND items.rack_id = ?"
-            params.append(rack_filter)
-
-        if slot_filter:
-            query += " AND items.slot_id = ?"
-            params.append(slot_filter)
-
-        query += " ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.id DESC"
-
         items = conn.execute(query, params).fetchall()
 
     grouped = {}
     for item in items:
-        sector_name = item['sector_name'] or '-'
-        rack_name = item['rack_name'] or '-'
-        slot_code = item['slot_code'] or ''
-        grouped.setdefault((sector_name, rack_name, slot_code), []).append(item)
+        key = (item['sector_name'], item['rack_name'], item['slot_code'] or '-')
+        grouped.setdefault(key, []).append(item)
 
     return render_template(
         'dashboard.html',
-        items=items,
+        sectors=fetch_sectors(),
+        racks=fetch_racks(),
         grouped=grouped,
-        sectors=sectors,
-        racks=racks,
-        rack_slots=rack_slots_all,
-        slot_counts=slot_counts,
-        selected_sector_id=sector_filter,
-        selected_rack_id=rack_filter,
-        selected_slot_id=slot_filter,
-        add_selected_rack_id=add_selected_rack_id,
-        add_selected_slot_id=add_selected_slot_id,
-        slots_by_rack=slots_by_rack,
+        selected_sector=selected_sector,
+        selected_rack=selected_rack,
+        selected_slot=selected_slot,
+        all_slot_codes=all_active_slot_codes(),
+        slots_by_rack=fetch_slots_by_rack(),
     )
 
 
@@ -849,54 +771,8 @@ def search():
 
 @app.route('/api/suggestions')
 def api_suggestions():
-    q = request.args.get('q', '').strip()
-    if not q:
-        return jsonify([])
-
-    like = f'%{q}%'
-    with closing(get_db()) as conn:
-        rows = conn.execute(
-            '''
-            SELECT
-                items.product_name,
-                items.quantity,
-                items.notes,
-                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
-                CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector,
-                CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack,
-                COALESCE(rack_slots.code, '') AS slot
-            FROM items
-            JOIN sectors ON sectors.id = items.sector_id
-            JOIN racks ON racks.id = items.rack_id
-            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
-            WHERE
-                lower(items.product_name) LIKE lower(?)
-                OR lower(COALESCE(items.notes, '')) LIKE lower(?)
-                OR lower(COALESCE(sectors.name, '')) LIKE lower(?)
-                OR lower(COALESCE(racks.name, '')) LIKE lower(?)
-                OR lower(COALESCE(rack_slots.code, '')) LIKE lower(?)
-            ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.product_name COLLATE NOCASE
-            LIMIT 20
-            ''',
-            (
-                OPTIONAL_SECTOR_NAME,
-                OPTIONAL_RACK_NAME,
-                like, like, like, like, like
-            )
-        ).fetchall()
-
-    return jsonify([
-        {
-            'product_name': row['product_name'] if hasattr(row, 'keys') else row[0],
-            'quantity': row['quantity'] if hasattr(row, 'keys') else row[1],
-            'notes': row['notes'] if hasattr(row, 'keys') else row[2],
-            'updated_at_display': row['updated_at_display'] if hasattr(row, 'keys') else row[3],
-            'sector': row['sector'] if hasattr(row, 'keys') else row[4],
-            'rack': row['rack'] if hasattr(row, 'keys') else row[5],
-            'slot': row['slot'] if hasattr(row, 'keys') else row[6],
-        }
-        for row in rows
-    ])
+    term = request.args.get('q', '').strip()
+    return jsonify(search_suggestions(term))
 
 
 @app.route('/storage')

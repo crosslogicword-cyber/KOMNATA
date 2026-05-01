@@ -1,0 +1,264 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="grid">
+    <section class="card">
+        <h2>Dodaj produkt</h2>
+        <form method="post" action="{{ url_for('add_item') }}" class="form-grid">
+            <label>Nazwa produktu
+                <input type="text" name="product_name" placeholder="np. Farba akrylowa" required>
+            </label>
+            <label>Ilość / opis ilości
+                <input type="text" name="quantity" placeholder="np. 3 szt., 1 karton">
+            </label>
+            <div class="sector-toggle-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="use-sector-checkbox">
+                    Użyj sektora
+                </label>
+                <label id="sector-field-wrapper" style="display:none; margin-top:8px;">Sektor <span class="muted">(opcjonalnie)</span>
+                    <select name="sector_id" id="sector-select">
+                        <option value="">Bez sektora</option>
+                        {% for sector in sectors %}
+                        <option value="{{ sector.id }}">{{ sector.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="sector-toggle-group">
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="use-rack-checkbox" checked>
+                    Użyj regału
+                </label>
+                <div id="rack-fields-wrapper" style="display:block; margin-top:8px;">
+                    <label>Regał <span class="muted">(opcjonalnie)</span>
+                        <select name="rack_id" id="rack-select">
+  <option value="">Bez regału</option>
+  {% for rack in racks %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
+</select>
+                    </label>
+                    <label>Miejsce w regale
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <label class="full">Notatki
+                <textarea name="notes" rows="3" placeholder="np. delikatne / data zakupu / dodatkowy opis"></textarea>
+            </label>
+            <button type="submit">Dodaj do Komnaty</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Filtr podglądu</h2>
+        <form method="get" action="{{ url_for('dashboard') }}" class="form-grid">
+            <label>Sektor
+                <select name="sector_id" id="filter-sector">
+                    <option value="">Wszystkie sektory</option>
+                    {% for sector in sectors %}
+                    <option value="{{ sector.id }}" {% if selected_sector_id|string == sector.id|string %}selected{% endif %}>{{ sector.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Regał
+                <select name="rack_id" id="filter-rack">
+                    <option value="">Wszystkie regały</option>
+                    {% for rack in racks %}
+                    <option value="{{ rack.id }}" {% if selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Miejsce
+          <select name="slot_id" id="filter-slot">
+            <option value="">Wszystkie miejsca</option>
+            {% if selected_rack_id and slots_by_rack.get(selected_rack_id|string) %}
+              {% for slot in slots_by_rack.get(selected_rack_id|string, []) %}
+              <option value="{{ slot.id }}" {% if selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+        </label>
+            <button type="submit">Pokaż</button>
+        </form>
+        <p class="muted">Rzecz możesz zapisać jako: tylko sektor, tylko regał + miejsce albo pełny adres sektor + regał + miejsce.</p>
+    </section>
+</div>
+
+<section class="card">
+    <div class="section-row">
+        <h2>Zawartość według lokalizacji</h2>
+        <a class="button-secondary" href="{{ url_for('print_view') }}" target="_blank">Wersja do wydruku</a>
+    </div>
+    {% if grouped %}
+        {% for (sector_name, rack_name, slot_code), items in grouped.items() %}
+        <div class="location-block">
+            <h3>{{ sector_name }} / {{ rack_name }} / {{ slot_code }}</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Produkt</th>
+                        <th>Ilość</th>
+                        <th>Notatki</th>
+                        <th>Ostatnia zmiana</th>
+                        <th>Akcja</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.product_name }}</td>
+                        <td>{{ item.quantity or '-' }}</td>
+                        <td>{{ item.notes or '-' }}</td>
+                        <td>{{ item.updated_at_display }}</td>
+                        <td class="actions-cell">
+                            <a class="button-inline" href="{{ url_for('edit_item', item_id=item.id) }}">Edytuj</a>
+                            <form method="post" action="{{ url_for('delete_item', item_id=item.id) }}" onsubmit="return confirm('Usunąć tę pozycję?');">
+                                <button class="danger" type="submit">Usuń</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p>Brak pozycji dla wybranego widoku.</p>
+    {% endif %}
+</section>
+
+<script>
+const rackSelect = document.getElementById('rack-select');
+const slotSelect = document.getElementById('slot-select');
+const slotsByRack = {{ slots_by_rack | tojson }};
+const filterRack = document.getElementById('filter-rack');
+const filterSlot = document.getElementById('filter-slot');
+
+function refreshFilterSlots() {
+  if (!filterRack || !filterSlot) return;
+  const rackId = filterRack.value || '';
+  const selected = "{{ selected_slot_id }}";
+  const slots = slotsByRack[rackId] || [];
+  filterSlot.innerHTML = '<option value="">Wszystkie miejsca</option>';
+  for (const slot of slots) {
+    const opt = document.createElement('option');
+    opt.value = String(slot.id);
+    opt.textContent = slot.code;
+    if (selected && String(selected) === String(slot.id)) opt.selected = true;
+    filterSlot.appendChild(opt);
+  }
+}
+
+if (filterRack && filterSlot) {
+  filterRack.addEventListener('change', refreshFilterSlots);
+  refreshFilterSlots();
+}
+const lastRackKey = 'komnata_last_rack_id';
+
+function pinLastRackToTop() {
+  const saved = localStorage.getItem(lastRackKey);
+  if (!saved || !rackSelect) return;
+
+  const options = Array.from(rackSelect.options);
+  const target = options.find(o => String(o.value).trim() === String(saved).trim());
+  if (!target) return;
+
+  const placeholder = options.find(o => String(o.value).trim() === '');
+  if (!placeholder || target === placeholder) return;
+
+  rackSelect.removeChild(target);
+  placeholder.insertAdjacentElement('afterend', target);
+  rackSelect.value = saved;
+}
+
+function refreshSlotOptions() {
+  const rackId = rackSelect.value;
+  const slots = slotsByRack[rackId] || [];
+  if (!rackId || !slots.length) {
+    slotSelect.innerHTML = '<option value="">Brak miejsc dla tego regału</option>';
+    return;
+  }
+  slotSelect.innerHTML = '<option value="">Wybierz miejsce</option>' +
+    slots.map(slot => `<option value="${slot.id}">${slot.code}</option>`).join('');
+}
+
+rackSelect.addEventListener('change', function () {
+  if (rackSelect.value) {
+    localStorage.setItem(lastRackKey, rackSelect.value);
+    pinLastRackToTop();
+  }
+  refreshSlotOptions();
+});
+
+pinLastRackToTop();
+refreshSlotOptions();
+
+const useSectorCheckbox = document.getElementById('use-sector-checkbox');
+const sectorFieldWrapper = document.getElementById('sector-field-wrapper');
+const sectorSelect = document.getElementById('sector-select');
+
+function refreshSectorVisibility() {
+  const enabled = useSectorCheckbox.checked;
+  sectorFieldWrapper.style.display = enabled ? 'block' : 'none';
+  if (!enabled && sectorSelect) {
+    sectorSelect.value = '';
+  }
+}
+
+useSectorCheckbox.addEventListener('change', refreshSectorVisibility);
+refreshSectorVisibility();
+
+const useRackCheckbox = document.getElementById('use-rack-checkbox');
+const rackFieldsWrapper = document.getElementById('rack-fields-wrapper');
+
+function refreshRackVisibility() {
+  const enabled = useRackCheckbox.checked;
+  rackFieldsWrapper.style.display = enabled ? 'block' : 'none';
+  if (!enabled) {
+    rackSelect.value = '';
+    slotSelect.innerHTML = '<option value="">Bez miejsca w regale</option>';
+  } else {
+    refreshSlotOptions();
+  }
+}
+
+useRackCheckbox.addEventListener('change', refreshRackVisibility);
+refreshRackVisibility();
+</script>
+
+<section class="card">
+  <h2>Ostatnio dodane</h2>
+  {% if recent_items %}
+  <table>
+    <thead>
+      <tr>
+        <th>Produkt</th>
+        <th>Lokalizacja</th>
+        <th>Ilość</th>
+        <th>Notatki</th>
+        <th>Ostatnia zmiana</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in recent_items %}
+      <tr>
+        <td>{{ item.product_name }}</td>
+        <td>{{ item.sector_name or '-' }} / {{ item.rack_name or '-' }}{% if item.slot_code %} / {{ item.slot_code }}{% endif %}</td>
+        <td>{{ item.quantity or '-' }}</td>
+        <td>{{ item.notes or '-' }}</td>
+        <td>{{ item.changed_display or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Brak ostatnio dodanych produktów.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

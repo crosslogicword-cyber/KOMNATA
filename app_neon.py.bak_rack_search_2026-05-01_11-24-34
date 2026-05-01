@@ -542,18 +542,6 @@ def dashboard():
         racks = fetch_racks(active_only=True)
         slot_counts = fetch_slot_counts()
 
-        last_added_row = conn.execute(
-            '''
-            SELECT rack_id, slot_id
-            FROM items
-            ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
-            LIMIT 1
-            '''
-        ).fetchone()
-
-        add_selected_rack_id = str(last_added_row['rack_id']) if last_added_row and last_added_row['rack_id'] is not None else ''
-        add_selected_slot_id = str(last_added_row['slot_id']) if last_added_row and last_added_row['slot_id'] is not None else ''
-
         rack_slots_all = conn.execute(
             '''
             SELECT
@@ -630,8 +618,6 @@ def dashboard():
         selected_sector_id=sector_filter,
         selected_rack_id=rack_filter,
         selected_slot_id=slot_filter,
-        add_selected_rack_id=add_selected_rack_id,
-        add_selected_slot_id=add_selected_slot_id,
         slots_by_rack=slots_by_rack,
     )
 
@@ -849,54 +835,8 @@ def search():
 
 @app.route('/api/suggestions')
 def api_suggestions():
-    q = request.args.get('q', '').strip()
-    if not q:
-        return jsonify([])
-
-    like = f'%{q}%'
-    with closing(get_db()) as conn:
-        rows = conn.execute(
-            '''
-            SELECT
-                items.product_name,
-                items.quantity,
-                items.notes,
-                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
-                CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector,
-                CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack,
-                COALESCE(rack_slots.code, '') AS slot
-            FROM items
-            JOIN sectors ON sectors.id = items.sector_id
-            JOIN racks ON racks.id = items.rack_id
-            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
-            WHERE
-                lower(items.product_name) LIKE lower(?)
-                OR lower(COALESCE(items.notes, '')) LIKE lower(?)
-                OR lower(COALESCE(sectors.name, '')) LIKE lower(?)
-                OR lower(COALESCE(racks.name, '')) LIKE lower(?)
-                OR lower(COALESCE(rack_slots.code, '')) LIKE lower(?)
-            ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.product_name COLLATE NOCASE
-            LIMIT 20
-            ''',
-            (
-                OPTIONAL_SECTOR_NAME,
-                OPTIONAL_RACK_NAME,
-                like, like, like, like, like
-            )
-        ).fetchall()
-
-    return jsonify([
-        {
-            'product_name': row['product_name'] if hasattr(row, 'keys') else row[0],
-            'quantity': row['quantity'] if hasattr(row, 'keys') else row[1],
-            'notes': row['notes'] if hasattr(row, 'keys') else row[2],
-            'updated_at_display': row['updated_at_display'] if hasattr(row, 'keys') else row[3],
-            'sector': row['sector'] if hasattr(row, 'keys') else row[4],
-            'rack': row['rack'] if hasattr(row, 'keys') else row[5],
-            'slot': row['slot'] if hasattr(row, 'keys') else row[6],
-        }
-        for row in rows
-    ])
+    term = request.args.get('q', '').strip()
+    return jsonify(search_suggestions(term))
 
 
 @app.route('/storage')

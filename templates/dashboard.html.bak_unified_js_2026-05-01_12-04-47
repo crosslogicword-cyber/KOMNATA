@@ -5,7 +5,7 @@
         <h2>Dodaj produkt</h2>
         <form method="post" action="{{ url_for('add_item') }}" class="form-grid">
             <label>Nazwa produktu
-                <input type="text" name="product_name" list="product-name-list" list="product-name-list" list="product-name-list" placeholder="np. Farba akrylowa" required list="product-name-list" list="product-name-live">
+                <input type="text" name="product_name" list="product-name-list" list="product-name-list" list="product-name-list" placeholder="np. Farba akrylowa" required list="product-name-list">
             </label>
             <label>Ilość / opis ilości
                 <input type="text" name="quantity" placeholder="np. 3 szt., 1 karton">
@@ -34,22 +34,17 @@
                         <select name="rack_id" id="rack-select">
   <option value="">Bez regału</option>
   {% for rack in racks %}
-            {% if rack.name != 'Bez regału' %}
-            <option value="{{ rack.id }}" {% if add_selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
-            {% endif %}
-            {% endfor %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
 </select>
                     </label>
                     <label>Miejsce w regale
-            <select name="slot_id" id="slot-select">
-              <option value="">Bez miejsca</option>
-              {% if add_selected_rack_id and slots_by_rack.get(add_selected_rack_id|string) %}
-                {% for slot in slots_by_rack.get(add_selected_rack_id|string, []) %}
-                <option value="{{ slot.id }}" {% if add_selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
-                {% endfor %}
-              {% endif %}
-            </select>
-          </label>
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
                 </div>
             </div>
             <label class="full">Notatki
@@ -170,7 +165,7 @@ window.slotsByRack = slotsByRack;
   }
 
   if (rackSelect && slotSelect) {
-    const selectedSlot = "{{ add_selected_slot_id or '' }}";
+    const selectedSlot = "{{ selected_slot_id or '' }}";
     fillSlots(slotSelect, rackSelect.value, selectedSlot);
     rackSelect.addEventListener('change', function () {
       fillSlots(slotSelect, rackSelect.value, '');
@@ -493,27 +488,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 <!-- FINAL_MEMORY_HINTS_START -->
-
-
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  const productInput = document.querySelector('input[name="product_name"]');
+  const productList = document.getElementById('product-name-live');
   const rackSelect = document.getElementById('rack-select');
   const slotSelect = document.getElementById('slot-select');
-  const LAST_RACK_KEY = 'komnata_last_rack_id';
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const slotsByRack = {{ slots_by_rack | tojson }};
+  const form = productInput ? productInput.closest('form') : null;
 
-  function setValueIfExists(selectEl, value) {
-    if (!selectEl || !value) return false;
-    const found = Array.from(selectEl.options).find(o => String(o.value) === String(value));
-    if (!found) return false;
-    selectEl.value = String(value);
-    return true;
-  }
+  const KEY_PRODUCT = 'komnata_last_product_name';
+  const KEY_RACK = 'komnata_last_rack_id';
+  const KEY_SLOT = 'komnata_last_slot_id';
 
-  function rebuildSlots(rackId, selectedSlotId) {
+  function fillSlotOptions(rackId, selectedSlotId) {
     if (!slotSelect) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
+    const map = window.slotsByRack || {};
+    const slots = map[String(rackId || '')] || [];
 
     slotSelect.innerHTML = '';
     const emptyOpt = document.createElement('option');
@@ -521,7 +511,7 @@ document.addEventListener('DOMContentLoaded', function () {
     emptyOpt.textContent = 'Bez miejsca';
     slotSelect.appendChild(emptyOpt);
 
-    for (const slot of slots) {
+    slots.forEach(slot => {
       const opt = document.createElement('option');
       opt.value = String(slot.id);
       opt.textContent = slot.code;
@@ -529,119 +519,111 @@ document.addEventListener('DOMContentLoaded', function () {
         opt.selected = true;
       }
       slotSelect.appendChild(opt);
-    }
+    });
   }
 
-  const savedRack = localStorage.getItem(LAST_RACK_KEY) || '';
-  const savedSlot = localStorage.getItem(LAST_SLOT_KEY) || '';
+  function setSelectValue(selectEl, value) {
+    if (!selectEl || !value) return false;
+    const opt = Array.from(selectEl.options).find(o => String(o.value) === String(value));
+    if (!opt) return false;
+    selectEl.value = String(value);
+    return true;
+  }
+
+  // przy starcie przywróć ostatni regał i miejsce
+  const savedRack = localStorage.getItem(KEY_RACK);
+  const savedSlot = localStorage.getItem(KEY_SLOT);
 
   if (rackSelect && savedRack) {
-    setValueIfExists(rackSelect, savedRack);
+    setSelectValue(rackSelect, savedRack);
   }
 
   if (rackSelect && slotSelect) {
-    rebuildSlots(rackSelect.value, savedSlot);
+    fillSlotOptions(rackSelect.value, savedSlot);
   }
 
+  // po zmianie regału odbuduj miejsca
   if (rackSelect) {
     rackSelect.addEventListener('change', function () {
       const rackId = rackSelect.value || '';
-      if (rackId) localStorage.setItem(LAST_RACK_KEY, rackId);
-      else localStorage.removeItem(LAST_RACK_KEY);
-
-      localStorage.removeItem(LAST_SLOT_KEY);
-      rebuildSlots(rackId, '');
+      if (rackId) {
+        localStorage.setItem(KEY_RACK, rackId);
+      } else {
+        localStorage.removeItem(KEY_RACK);
+      }
+      localStorage.removeItem(KEY_SLOT);
+      fillSlotOptions(rackId, '');
     });
   }
 
+  // po zmianie miejsca zapamiętaj
   if (slotSelect) {
     slotSelect.addEventListener('change', function () {
       const slotId = slotSelect.value || '';
-      if (slotId) localStorage.setItem(LAST_SLOT_KEY, slotId);
-      else localStorage.removeItem(LAST_SLOT_KEY);
+      if (slotId) {
+        localStorage.setItem(KEY_SLOT, slotId);
+      } else {
+        localStorage.removeItem(KEY_SLOT);
+      }
     });
   }
 
-  const addForm = rackSelect ? rackSelect.closest('form') : null;
-  if (addForm) {
-    addForm.addEventListener('submit', function () {
+  // po submit zapamiętaj ostatnie wartości
+  if (form) {
+    form.addEventListener('submit', function () {
+      if (productInput && productInput.value.trim()) {
+        localStorage.setItem(KEY_PRODUCT, productInput.value.trim());
+      }
       if (rackSelect && rackSelect.value) {
-        localStorage.setItem(LAST_RACK_KEY, rackSelect.value);
+        localStorage.setItem(KEY_RACK, rackSelect.value);
       }
       if (slotSelect && slotSelect.value) {
-        localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
+        localStorage.setItem(KEY_SLOT, slotSelect.value);
       }
     });
   }
-});
-</script>
 
+  // podpowiedzi produktów po wpisaniu
+  async function refreshProductHints() {
+    if (!productInput || !productList) return;
+    const q = productInput.value.trim();
+    productList.innerHTML = '';
 
-<!-- FINAL_MEMORY_HINTS_START -->
-
-
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const rackSelect = document.getElementById('rack-select');
-  const slotSelect = document.getElementById('slot-select');
-  const filterRack = document.getElementById('filter-rack');
-  const filterSlot = document.getElementById('filter-slot');
-  const slotsByRack = {{ slots_by_rack | tojson }};
-
-  function fillSlots(selectEl, rackId, selectedSlotId, emptyLabel) {
-    if (!selectEl) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
-    selectEl.innerHTML = '';
-
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = emptyLabel;
-    selectEl.appendChild(emptyOpt);
-
-    for (const slot of slots) {
+    const remembered = localStorage.getItem(KEY_PRODUCT);
+    if (remembered && (!q || remembered.toLowerCase().includes(q.toLowerCase()))) {
       const opt = document.createElement('option');
-      opt.value = String(slot.id);
-      opt.textContent = slot.code;
-      if (selectedSlotId && String(selectedSlotId) === String(slot.id)) {
-        opt.selected = true;
-      }
-      selectEl.appendChild(opt);
-    }
-  }
-
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const SERVER_SELECTED_SLOT = "{{ add_selected_slot_id or '' }}";
-
-  if (rackSelect && slotSelect) {
-    if (rackSelect.value) {
-      fillSlots(slotSelect, rackSelect.value, SERVER_SELECTED_SLOT, 'Bez miejsca');
+      opt.value = remembered;
+      productList.appendChild(opt);
     }
 
-    rackSelect.addEventListener('change', function () {
-      localStorage.removeItem(LAST_SLOT_KEY);
-      fillSlots(slotSelect, rackSelect.value, '', 'Bez miejsca');
-    });
+    if (!q) return;
 
-    slotSelect.addEventListener('change', function () {
-      if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
+    try {
+      const res = await fetch('/api/suggestions?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      const seen = new Set(Array.from(productList.options).map(o => o.value.toLowerCase()));
 
-    const addForm = rackSelect.closest('form');
-    if (addForm) {
-      addForm.addEventListener('submit', function () {
-        if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
+      data.forEach(item => {
+        const name = (item.product_name || '').trim();
+        if (!name) return;
+        if (seen.has(name.toLowerCase())) return;
+        seen.add(name.toLowerCase());
+        const opt = document.createElement('option');
+        opt.value = name;
+        productList.appendChild(opt);
       });
-    }
+    } catch (e) {}
   }
 
-  if (filterRack && filterSlot) {
-    fillSlots(filterSlot, filterRack.value, "{{ selected_slot_id or '' }}", 'Wszystkie miejsca');
-    filterRack.addEventListener('change', function () {
-      fillSlots(filterSlot, filterRack.value, '', 'Wszystkie miejsca');
-    });
+  if (productInput) {
+    productInput.setAttribute('autocomplete', 'off');
+    const remembered = localStorage.getItem(KEY_PRODUCT);
+    if (remembered) {
+      productInput.placeholder = 'Ostatnio: ' + remembered;
+    }
+    productInput.addEventListener('input', refreshProductHints);
+    productInput.addEventListener('focus', refreshProductHints);
   }
 });
 </script>
-
+<!-- FINAL_MEMORY_HINTS_START -->

@@ -34,22 +34,17 @@
                         <select name="rack_id" id="rack-select">
   <option value="">Bez regału</option>
   {% for rack in racks %}
-            {% if rack.name != 'Bez regału' %}
-            <option value="{{ rack.id }}" {% if add_selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
-            {% endif %}
-            {% endfor %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
 </select>
                     </label>
                     <label>Miejsce w regale
-            <select name="slot_id" id="slot-select">
-              <option value="">Bez miejsca</option>
-              {% if add_selected_rack_id and slots_by_rack.get(add_selected_rack_id|string) %}
-                {% for slot in slots_by_rack.get(add_selected_rack_id|string, []) %}
-                <option value="{{ slot.id }}" {% if add_selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
-                {% endfor %}
-              {% endif %}
-            </select>
-          </label>
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
                 </div>
             </div>
             <label class="full">Notatki
@@ -170,7 +165,7 @@ window.slotsByRack = slotsByRack;
   }
 
   if (rackSelect && slotSelect) {
-    const selectedSlot = "{{ add_selected_slot_id or '' }}";
+    const selectedSlot = "{{ selected_slot_id or '' }}";
     fillSlots(slotSelect, rackSelect.value, selectedSlot);
     rackSelect.addEventListener('change', function () {
       fillSlots(slotSelect, rackSelect.value, '');
@@ -494,99 +489,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <!-- FINAL_MEMORY_HINTS_START -->
 
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const rackSelect = document.getElementById('rack-select');
-  const slotSelect = document.getElementById('slot-select');
-  const LAST_RACK_KEY = 'komnata_last_rack_id';
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const slotsByRack = {{ slots_by_rack | tojson }};
-
-  function setValueIfExists(selectEl, value) {
-    if (!selectEl || !value) return false;
-    const found = Array.from(selectEl.options).find(o => String(o.value) === String(value));
-    if (!found) return false;
-    selectEl.value = String(value);
-    return true;
-  }
-
-  function rebuildSlots(rackId, selectedSlotId) {
-    if (!slotSelect) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
-
-    slotSelect.innerHTML = '';
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = 'Bez miejsca';
-    slotSelect.appendChild(emptyOpt);
-
-    for (const slot of slots) {
-      const opt = document.createElement('option');
-      opt.value = String(slot.id);
-      opt.textContent = slot.code;
-      if (selectedSlotId && String(selectedSlotId) === String(slot.id)) {
-        opt.selected = true;
-      }
-      slotSelect.appendChild(opt);
-    }
-  }
-
-  const savedRack = localStorage.getItem(LAST_RACK_KEY) || '';
-  const savedSlot = localStorage.getItem(LAST_SLOT_KEY) || '';
-
-  if (rackSelect && savedRack) {
-    setValueIfExists(rackSelect, savedRack);
-  }
-
-  if (rackSelect && slotSelect) {
-    rebuildSlots(rackSelect.value, savedSlot);
-  }
-
-  if (rackSelect) {
-    rackSelect.addEventListener('change', function () {
-      const rackId = rackSelect.value || '';
-      if (rackId) localStorage.setItem(LAST_RACK_KEY, rackId);
-      else localStorage.removeItem(LAST_RACK_KEY);
-
-      localStorage.removeItem(LAST_SLOT_KEY);
-      rebuildSlots(rackId, '');
-    });
-  }
-
-  if (slotSelect) {
-    slotSelect.addEventListener('change', function () {
-      const slotId = slotSelect.value || '';
-      if (slotId) localStorage.setItem(LAST_SLOT_KEY, slotId);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-  }
-
-  const addForm = rackSelect ? rackSelect.closest('form') : null;
-  if (addForm) {
-    addForm.addEventListener('submit', function () {
-      if (rackSelect && rackSelect.value) {
-        localStorage.setItem(LAST_RACK_KEY, rackSelect.value);
-      }
-      if (slotSelect && slotSelect.value) {
-        localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      }
-    });
-  }
-});
-</script>
-
-
-<!-- FINAL_MEMORY_HINTS_START -->
-
-
-
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   const rackSelect = document.getElementById('rack-select');
   const slotSelect = document.getElementById('slot-select');
   const filterRack = document.getElementById('filter-rack');
   const filterSlot = document.getElementById('filter-slot');
+  const productInput = document.querySelector('input[name="product_name"]');
+  const productList = document.getElementById('product-name-live');
+  const addForm = rackSelect ? rackSelect.closest('form') : (productInput ? productInput.closest('form') : null);
+
+  const LAST_RACK_KEY = 'komnata_last_rack_id';
+  const LAST_SLOT_KEY = 'komnata_last_slot_id';
+  const LAST_PRODUCT_KEY = 'komnata_last_product_name';
+
   const slotsByRack = {{ slots_by_rack | tojson }};
 
   function fillSlots(selectEl, rackId, selectedSlotId, emptyLabel) {
@@ -610,32 +526,104 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const SERVER_SELECTED_SLOT = "{{ add_selected_slot_id or '' }}";
-
-  if (rackSelect && slotSelect) {
-    if (rackSelect.value) {
-      fillSlots(slotSelect, rackSelect.value, SERVER_SELECTED_SLOT, 'Bez miejsca');
-    }
-
-    rackSelect.addEventListener('change', function () {
-      localStorage.removeItem(LAST_SLOT_KEY);
-      fillSlots(slotSelect, rackSelect.value, '', 'Bez miejsca');
-    });
-
-    slotSelect.addEventListener('change', function () {
-      if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-
-    const addForm = rackSelect.closest('form');
-    if (addForm) {
-      addForm.addEventListener('submit', function () {
-        if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      });
-    }
+  function setValueIfExists(selectEl, value) {
+    if (!selectEl || !value) return false;
+    const found = Array.from(selectEl.options).find(o => String(o.value) === String(value));
+    if (!found) return false;
+    selectEl.value = String(value);
+    return true;
   }
 
+  // ===== FORMULARZ DODAWANIA =====
+  const savedRack = localStorage.getItem(LAST_RACK_KEY) || '';
+  const savedSlot = localStorage.getItem(LAST_SLOT_KEY) || '';
+  const savedProduct = localStorage.getItem(LAST_PRODUCT_KEY) || '';
+
+  if (rackSelect && savedRack) {
+    setValueIfExists(rackSelect, savedRack);
+  }
+
+  if (rackSelect && slotSelect) {
+    fillSlots(slotSelect, rackSelect.value, savedSlot, 'Bez miejsca');
+  }
+
+  if (rackSelect) {
+    rackSelect.addEventListener('change', function () {
+      const rackId = rackSelect.value || '';
+      if (rackId) localStorage.setItem(LAST_RACK_KEY, rackId);
+      else localStorage.removeItem(LAST_RACK_KEY);
+
+      localStorage.removeItem(LAST_SLOT_KEY);
+      fillSlots(slotSelect, rackId, '', 'Bez miejsca');
+    });
+  }
+
+  if (slotSelect) {
+    slotSelect.addEventListener('change', function () {
+      const slotId = slotSelect.value || '';
+      if (slotId) localStorage.setItem(LAST_SLOT_KEY, slotId);
+      else localStorage.removeItem(LAST_SLOT_KEY);
+    });
+  }
+
+  if (addForm) {
+    addForm.addEventListener('submit', function () {
+      if (productInput && productInput.value.trim()) {
+        localStorage.setItem(LAST_PRODUCT_KEY, productInput.value.trim());
+      }
+      if (rackSelect && rackSelect.value) {
+        localStorage.setItem(LAST_RACK_KEY, rackSelect.value);
+      }
+      if (slotSelect && slotSelect.value) {
+        localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
+      }
+    });
+  }
+
+  // ===== PODPOWIEDZI PRODUKTÓW =====
+  async function refreshProductHints() {
+    if (!productInput || !productList) return;
+
+    const q = productInput.value.trim();
+    productList.innerHTML = '';
+
+    // ostatni produkt jako pierwsza podpowiedź
+    if (savedProduct && (!q || savedProduct.toLowerCase().includes(q.toLowerCase()))) {
+      const rememberedOpt = document.createElement('option');
+      rememberedOpt.value = savedProduct;
+      productList.appendChild(rememberedOpt);
+    }
+
+    if (!q) return;
+
+    try {
+      const res = await fetch('/api/suggestions?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      const seen = new Set(Array.from(productList.options).map(o => o.value.toLowerCase()));
+
+      for (const item of data) {
+        const name = String(item.product_name || '').trim();
+        if (!name) continue;
+        if (seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+
+        const opt = document.createElement('option');
+        opt.value = name;
+        productList.appendChild(opt);
+      }
+    } catch (e) {}
+  }
+
+  if (productInput) {
+    if (savedProduct && !productInput.value) {
+      productInput.placeholder = 'Ostatnio: ' + savedProduct;
+    }
+    productInput.setAttribute('autocomplete', 'off');
+    productInput.addEventListener('input', refreshProductHints);
+    productInput.addEventListener('focus', refreshProductHints);
+  }
+
+  // ===== FILTR REGAŁ / MIEJSCE =====
   if (filterRack && filterSlot) {
     fillSlots(filterSlot, filterRack.value, "{{ selected_slot_id or '' }}", 'Wszystkie miejsca');
     filterRack.addEventListener('change', function () {
@@ -645,3 +633,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
+<!-- FINAL_MEMORY_HINTS_START -->

@@ -170,7 +170,7 @@ window.slotsByRack = slotsByRack;
   }
 
   if (rackSelect && slotSelect) {
-    const selectedSlot = "{{ add_selected_slot_id or '' }}";
+    const selectedSlot = "{{ selected_slot_id or '' }}";
     fillSlots(slotSelect, rackSelect.value, selectedSlot);
     rackSelect.addEventListener('change', function () {
       fillSlots(slotSelect, rackSelect.value, '');
@@ -610,30 +610,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const SERVER_SELECTED_SLOT = "{{ add_selected_slot_id or '' }}";
-
   if (rackSelect && slotSelect) {
-    if (rackSelect.value) {
-      fillSlots(slotSelect, rackSelect.value, SERVER_SELECTED_SLOT, 'Bez miejsca');
-    }
-
     rackSelect.addEventListener('change', function () {
-      localStorage.removeItem(LAST_SLOT_KEY);
       fillSlots(slotSelect, rackSelect.value, '', 'Bez miejsca');
     });
-
-    slotSelect.addEventListener('change', function () {
-      if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-
-    const addForm = rackSelect.closest('form');
-    if (addForm) {
-      addForm.addEventListener('submit', function () {
-        if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      });
-    }
   }
 
   if (filterRack && filterSlot) {

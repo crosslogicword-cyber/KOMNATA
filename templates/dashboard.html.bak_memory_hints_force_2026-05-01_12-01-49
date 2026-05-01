@@ -5,7 +5,7 @@
         <h2>Dodaj produkt</h2>
         <form method="post" action="{{ url_for('add_item') }}" class="form-grid">
             <label>Nazwa produktu
-                <input type="text" name="product_name" list="product-name-list" list="product-name-list" list="product-name-list" placeholder="np. Farba akrylowa" required list="product-name-list" list="product-name-live">
+                <input type="text" name="product_name" list="product-name-list" list="product-name-list" list="product-name-list" placeholder="np. Farba akrylowa" required list="product-name-list">
             </label>
             <label>Ilość / opis ilości
                 <input type="text" name="quantity" placeholder="np. 3 szt., 1 karton">
@@ -34,22 +34,17 @@
                         <select name="rack_id" id="rack-select">
   <option value="">Bez regału</option>
   {% for rack in racks %}
-            {% if rack.name != 'Bez regału' %}
-            <option value="{{ rack.id }}" {% if add_selected_rack_id|string == rack.id|string %}selected{% endif %}>{{ rack.name }}</option>
-            {% endif %}
-            {% endfor %}
+    {% if rack.name != 'Bez regału' %}
+      <option value="{{ rack.id }}">{{ rack.name }}</option>
+    {% endif %}
+  {% endfor %}
 </select>
                     </label>
                     <label>Miejsce w regale
-            <select name="slot_id" id="slot-select">
-              <option value="">Bez miejsca</option>
-              {% if add_selected_rack_id and slots_by_rack.get(add_selected_rack_id|string) %}
-                {% for slot in slots_by_rack.get(add_selected_rack_id|string, []) %}
-                <option value="{{ slot.id }}" {% if add_selected_slot_id|string == slot.id|string %}selected{% endif %}>{{ slot.code }}</option>
-                {% endfor %}
-              {% endif %}
-            </select>
-          </label>
+                        <select name="slot_id" id="slot-select">
+                            <option value="">Najpierw wybierz regał</option>
+                        </select>
+                    </label>
                 </div>
             </div>
             <label class="full">Notatki
@@ -57,7 +52,6 @@
             </label>
             <button type="submit">Dodaj do Komnaty</button>
           <datalist id="product-name-list"></datalist>
-  <datalist id="product-name-live"></datalist>
 </form>
     </section>
 
@@ -146,7 +140,6 @@ document.addEventListener('DOMContentLoaded', function () {
   const filterRack = document.getElementById('filter-rack');
   const filterSlot = document.getElementById('filter-slot');
   const slotsByRack = {{ slots_by_rack | tojson }};
-window.slotsByRack = slotsByRack;
 
   function fillSlots(selectEl, rackId, selectedValue) {
     if (!selectEl) return;
@@ -170,7 +163,7 @@ window.slotsByRack = slotsByRack;
   }
 
   if (rackSelect && slotSelect) {
-    const selectedSlot = "{{ add_selected_slot_id or '' }}";
+    const selectedSlot = "{{ selected_slot_id or '' }}";
     fillSlots(slotSelect, rackSelect.value, selectedSlot);
     rackSelect.addEventListener('change', function () {
       fillSlots(slotSelect, rackSelect.value, '');
@@ -489,159 +482,4 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <!-- KOMNATA_MEMORY_END -->
-
-
-
-<!-- FINAL_MEMORY_HINTS_START -->
-
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const rackSelect = document.getElementById('rack-select');
-  const slotSelect = document.getElementById('slot-select');
-  const LAST_RACK_KEY = 'komnata_last_rack_id';
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const slotsByRack = {{ slots_by_rack | tojson }};
-
-  function setValueIfExists(selectEl, value) {
-    if (!selectEl || !value) return false;
-    const found = Array.from(selectEl.options).find(o => String(o.value) === String(value));
-    if (!found) return false;
-    selectEl.value = String(value);
-    return true;
-  }
-
-  function rebuildSlots(rackId, selectedSlotId) {
-    if (!slotSelect) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
-
-    slotSelect.innerHTML = '';
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = 'Bez miejsca';
-    slotSelect.appendChild(emptyOpt);
-
-    for (const slot of slots) {
-      const opt = document.createElement('option');
-      opt.value = String(slot.id);
-      opt.textContent = slot.code;
-      if (selectedSlotId && String(selectedSlotId) === String(slot.id)) {
-        opt.selected = true;
-      }
-      slotSelect.appendChild(opt);
-    }
-  }
-
-  const savedRack = localStorage.getItem(LAST_RACK_KEY) || '';
-  const savedSlot = localStorage.getItem(LAST_SLOT_KEY) || '';
-
-  if (rackSelect && savedRack) {
-    setValueIfExists(rackSelect, savedRack);
-  }
-
-  if (rackSelect && slotSelect) {
-    rebuildSlots(rackSelect.value, savedSlot);
-  }
-
-  if (rackSelect) {
-    rackSelect.addEventListener('change', function () {
-      const rackId = rackSelect.value || '';
-      if (rackId) localStorage.setItem(LAST_RACK_KEY, rackId);
-      else localStorage.removeItem(LAST_RACK_KEY);
-
-      localStorage.removeItem(LAST_SLOT_KEY);
-      rebuildSlots(rackId, '');
-    });
-  }
-
-  if (slotSelect) {
-    slotSelect.addEventListener('change', function () {
-      const slotId = slotSelect.value || '';
-      if (slotId) localStorage.setItem(LAST_SLOT_KEY, slotId);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-  }
-
-  const addForm = rackSelect ? rackSelect.closest('form') : null;
-  if (addForm) {
-    addForm.addEventListener('submit', function () {
-      if (rackSelect && rackSelect.value) {
-        localStorage.setItem(LAST_RACK_KEY, rackSelect.value);
-      }
-      if (slotSelect && slotSelect.value) {
-        localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      }
-    });
-  }
-});
-</script>
-
-
-<!-- FINAL_MEMORY_HINTS_START -->
-
-
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const rackSelect = document.getElementById('rack-select');
-  const slotSelect = document.getElementById('slot-select');
-  const filterRack = document.getElementById('filter-rack');
-  const filterSlot = document.getElementById('filter-slot');
-  const slotsByRack = {{ slots_by_rack | tojson }};
-
-  function fillSlots(selectEl, rackId, selectedSlotId, emptyLabel) {
-    if (!selectEl) return;
-    const slots = slotsByRack[String(rackId || '')] || [];
-    selectEl.innerHTML = '';
-
-    const emptyOpt = document.createElement('option');
-    emptyOpt.value = '';
-    emptyOpt.textContent = emptyLabel;
-    selectEl.appendChild(emptyOpt);
-
-    for (const slot of slots) {
-      const opt = document.createElement('option');
-      opt.value = String(slot.id);
-      opt.textContent = slot.code;
-      if (selectedSlotId && String(selectedSlotId) === String(slot.id)) {
-        opt.selected = true;
-      }
-      selectEl.appendChild(opt);
-    }
-  }
-
-  const LAST_SLOT_KEY = 'komnata_last_slot_id';
-  const SERVER_SELECTED_SLOT = "{{ add_selected_slot_id or '' }}";
-
-  if (rackSelect && slotSelect) {
-    if (rackSelect.value) {
-      fillSlots(slotSelect, rackSelect.value, SERVER_SELECTED_SLOT, 'Bez miejsca');
-    }
-
-    rackSelect.addEventListener('change', function () {
-      localStorage.removeItem(LAST_SLOT_KEY);
-      fillSlots(slotSelect, rackSelect.value, '', 'Bez miejsca');
-    });
-
-    slotSelect.addEventListener('change', function () {
-      if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      else localStorage.removeItem(LAST_SLOT_KEY);
-    });
-
-    const addForm = rackSelect.closest('form');
-    if (addForm) {
-      addForm.addEventListener('submit', function () {
-        if (slotSelect.value) localStorage.setItem(LAST_SLOT_KEY, slotSelect.value);
-      });
-    }
-  }
-
-  if (filterRack && filterSlot) {
-    fillSlots(filterSlot, filterRack.value, "{{ selected_slot_id or '' }}", 'Wszystkie miejsca');
-    filterRack.addEventListener('change', function () {
-      fillSlots(filterSlot, filterRack.value, '', 'Wszystkie miejsca');
-    });
-  }
-});
-</script>
 
