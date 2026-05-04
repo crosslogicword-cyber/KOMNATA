@@ -586,6 +586,7 @@ def dashboard():
     with closing(get_db()) as conn:
         sectors = fetch_sectors(active_only=True)
         racks = fetch_racks(active_only=True)
+        slots_by_rack = fetch_slots_by_rack(active_only=True)
     return render_template(
         'dashboard.html',
         items=[],
@@ -600,7 +601,7 @@ def dashboard():
         add_selected_rack_id='',
         add_selected_slot_id='',
         recent_items=[],
-        slots_by_rack={},
+        slots_by_rack=slots_by_rack,
     ), 200
 
 
