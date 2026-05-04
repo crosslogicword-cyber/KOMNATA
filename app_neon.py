@@ -579,14 +579,20 @@ def inject_system_status():
 
 @app.route('/')
 def dashboard():
+    print("[DASH] start", flush=True)
     sector_filter = request.args.get('sector_id', '').strip()
     rack_filter = request.args.get('rack_id', '').strip()
     slot_filter = request.args.get('slot_id', '').strip()
+    print(f"[DASH] filters sector={sector_filter!r} rack={rack_filter!r} slot={slot_filter!r}", flush=True)
 
     with closing(get_db()) as conn:
+        print("[DASH] db opened", flush=True)
         sectors = fetch_sectors(active_only=True)
+        print(f"[DASH] sectors ok: {len(sectors)}", flush=True)
         racks = fetch_racks(active_only=True)
+        print(f"[DASH] racks ok: {len(racks)}", flush=True)
         slot_counts = fetch_slot_counts()
+        print(f"[DASH] slot_counts ok: {len(slot_counts)}", flush=True)
 
         last_added_row = conn.execute(
             '''
@@ -600,6 +606,7 @@ def dashboard():
         add_selected_rack_id = str(last_added_row['rack_id']) if last_added_row and last_added_row['rack_id'] is not None else ''
         add_selected_slot_id = str(last_added_row['slot_id']) if last_added_row and last_added_row['slot_id'] is not None else ''
 
+        print("[DASH] before rack_slots_all", flush=True)
         rack_slots_all = conn.execute(
             '''
             SELECT
@@ -613,6 +620,7 @@ def dashboard():
             ORDER BY rack_slots.rack_id, rack_slots.sort_order, rack_slots.code
             '''
         ).fetchall()
+        print(f"[DASH] rack_slots_all ok: {len(rack_slots_all)}", flush=True)
 
         slots_by_rack = {}
         for row in rack_slots_all:
@@ -656,7 +664,9 @@ def dashboard():
 
         query += " ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.id DESC"
 
+        print("[DASH] before items query", flush=True)
         items = conn.execute(query, params).fetchall()
+        print(f"[DASH] items ok: {len(items)}", flush=True)
 
     grouped = {}
     for item in items:
@@ -665,6 +675,8 @@ def dashboard():
         slot_code = item['slot_code'] or ''
         grouped.setdefault((sector_name, rack_name, slot_code), []).append(item)
 
+    print(f"[DASH] grouped ok: {len(grouped)}", flush=True)
+    print("[DASH] before render_template", flush=True)
     return render_template(
         'dashboard.html',
         items=items,
