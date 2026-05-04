@@ -594,6 +594,9 @@ def dashboard():
         selected_sector_id='',
         selected_rack_id='',
         selected_slot_id='',
+        add_selected_rack_id='',
+        add_selected_slot_id='',
+        recent_items=[],
         slots_by_rack={},
     ), 200
 
