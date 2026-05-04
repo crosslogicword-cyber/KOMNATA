@@ -577,6 +577,10 @@ def inject_system_status():
     }
 
 
+@app.route('/ping')
+def ping():
+    return 'OK KOMNATA', 200
+
 @app.route('/')
 def dashboard():
     print("[DASH] start", flush=True)
