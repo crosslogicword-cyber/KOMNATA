@@ -583,7 +583,19 @@ def ping():
 
 @app.route('/')
 def dashboard():
-    return render_template('dashboard.html'), 200
+    return render_template(
+        'dashboard.html',
+        items=[],
+        grouped={},
+        sectors=[],
+        racks=[],
+        rack_slots=[],
+        slot_counts={},
+        selected_sector_id='',
+        selected_rack_id='',
+        selected_slot_id='',
+        slots_by_rack={},
+    ), 200
 
 
 @app.route('/items/add', methods=['POST'])
