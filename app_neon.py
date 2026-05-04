@@ -583,12 +583,15 @@ def ping():
 
 @app.route('/')
 def dashboard():
+    with closing(get_db()) as conn:
+        sectors = fetch_sectors(active_only=True)
+        racks = fetch_racks(active_only=True)
     return render_template(
         'dashboard.html',
         items=[],
         grouped={},
-        sectors=[],
-        racks=[],
+        sectors=sectors,
+        racks=racks,
         rack_slots=[],
         slot_counts={},
         selected_sector_id='',
