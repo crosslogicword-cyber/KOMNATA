@@ -583,7 +583,7 @@ def ping():
 
 @app.route('/')
 def dashboard():
-    return '<h1>Komnata online działa</h1><p>Root route odpowiada poprawnie.</p>', 200
+    return render_template('dashboard.html'), 200
 
 
 @app.route('/items/add', methods=['POST'])
