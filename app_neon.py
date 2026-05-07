@@ -599,94 +599,36 @@ def inject_system_status():
 
 @app.route('/')
 def dashboard():
-    sector_filter = request.args.get('sector_id', '').strip()
-    rack_filter = request.args.get('rack_id', '').strip()
-    slot_filter = request.args.get('slot_id', '').strip()
-
     with closing(get_db()) as conn:
-        sectors = fetch_sectors(active_only=True)
-        racks = fetch_racks(active_only=True)
-        slot_counts = fetch_slot_counts()
-
-        rack_slots_all = conn.execute(
-            '''
-            SELECT
-                rack_slots.id,
-                rack_slots.rack_id,
-                rack_slots.code,
-                rack_slots.sort_order,
-                rack_slots.is_active
-            FROM rack_slots
-            WHERE rack_slots.is_active = TRUE
-            ORDER BY rack_slots.rack_id, rack_slots.sort_order, rack_slots.code
-            '''
-        ).fetchall()
-
-        slots_by_rack = {}
-        for row in rack_slots_all:
-            rack_key = str(row['rack_id'])
-            slots_by_rack.setdefault(rack_key, []).append({
-                'id': row['id'],
-                'code': row['code']
-            })
-
-        query = '''
-            SELECT
-                items.id,
-                items.product_name,
-                items.quantity,
-                items.notes,
-                items.extra_field,
-                CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector_name,
-                CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack_name,
-                COALESCE(rack_slots.code, '') AS slot_code,
-                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
-                COALESCE(items.updated_at, items.created_at) AS sort_ts
-            FROM items
-            JOIN sectors ON sectors.id = items.sector_id
-            JOIN racks ON racks.id = items.rack_id
-            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
-            WHERE 1=1
-        '''
-        params = [OPTIONAL_SECTOR_NAME, OPTIONAL_RACK_NAME]
-
-        if sector_filter:
-            query += " AND items.sector_id = ?"
-            params.append(sector_filter)
-
-        if rack_filter:
-            query += " AND items.rack_id = ?"
-            params.append(rack_filter)
-
-        if slot_filter:
-            query += " AND items.slot_id = ?"
-            params.append(slot_filter)
-
-        query += " ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.id DESC"
-
-        items = conn.execute(query, params).fetchall()
-
-    grouped = {}
-    for item in items:
-        sector_name = item['sector_name'] or '-'
-        rack_name = item['rack_name'] or '-'
-        slot_code = item['slot_code'] or ''
-        grouped.setdefault((sector_name, rack_name, slot_code), []).append(item)
+        try:
+            sectors = fetch_sectors(active_only=True)
+        except Exception:
+            sectors = []
+        try:
+            racks = fetch_racks(active_only=True)
+        except Exception:
+            racks = []
+        try:
+            slots_by_rack = fetch_slots_by_rack(active_only=True)
+        except Exception:
+            slots_by_rack = {}
 
     return render_template(
         'dashboard.html',
-        items=items,
-        grouped=grouped,
+        items=[],
+        grouped={},
         sectors=sectors,
         racks=racks,
-        rack_slots=rack_slots_all,
-        slot_counts=slot_counts,
-        selected_sector_id=sector_filter,
-        selected_rack_id=rack_filter,
-        selected_slot_id=slot_filter,
+        rack_slots=[],
+        slot_counts={},
+        selected_sector_id='',
+        selected_rack_id='',
+        selected_slot_id='',
+        add_selected_rack_id='',
+        add_selected_slot_id='',
+        recent_items=[],
         slots_by_rack=slots_by_rack,
     )
-
 
 @app.route('/items/add', methods=['POST'])
 def add_item():
