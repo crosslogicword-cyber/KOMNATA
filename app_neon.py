@@ -1491,6 +1491,13 @@ def import_excel():
     return render_template('import_excel.html')
 
 
+
+
+@app.route('/healthz')
+def healthz():
+    return 'OK_HEALTHZ', 200
+
+
 if __name__ == '__main__':
     db = get_db()
     try:
