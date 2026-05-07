@@ -15,12 +15,6 @@ def now_local_display():
 import os
 import re
 import sqlite3
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-except Exception:
-    psycopg2 = None
-    RealDictCursor = None
 from contextlib import closing
 from difflib import SequenceMatcher
 from werkzeug.utils import secure_filename
@@ -55,50 +49,10 @@ OPTIONAL_RACK_NAME = 'Bez regału'
 NUMERIC_PREFIX_RE = re.compile(r'^(\d+)')
 
 
-
-class DBCompatConnection:
-    def __init__(self, raw, engine: str):
-        self.raw = raw
-        self.engine = engine
-
-    def execute(self, query, params=()):
-        params = params or ()
-        if self.engine == "postgres":
-            pg_query = query.replace("%", "%%")
-            pg_query = pg_query.replace("?", "%s")
-            cur = self.raw.cursor(cursor_factory=RealDictCursor)
-            cur.execute(pg_query, params)
-            return cur
-        return self.raw.execute(query, params)
-
-    def commit(self):
-        return self.raw.commit()
-
-    def rollback(self):
-        return self.raw.rollback()
-
-    def close(self):
-        return self.raw.close()
-
-    def executescript(self, script):
-        if self.engine == "postgres":
-            cur = self.raw.cursor(cursor_factory=RealDictCursor)
-            for part in [x.strip() for x in script.split(';') if x.strip()]:
-                cur.execute(part)
-            return cur
-        return self.raw.executescript(script)
-
 def get_db():
-    database_url = (os.environ.get("DATABASE_URL") or "").strip()
-
-    if database_url and psycopg2 is not None:
-        raw = psycopg2.connect(database_url, sslmode="require")
-        raw.autocommit = False
-        return DBCompatConnection(raw, "postgres")
-
-    raw = sqlite3.connect(DB_PATH)
-    raw.row_factory = sqlite3.Row
-    return DBCompatConnection(raw, "sqlite")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def natural_sort_key(value: str):
@@ -160,8 +114,8 @@ def apply_layout_to_rack(conn: sqlite3.Connection, rack_id: int, layout_row: sql
 def fetch_layouts(active_only: bool = True):
     query = "SELECT * FROM layouts"
     if active_only:
-        query += " WHERE is_active = TRUE"
-    query += " ORDER BY LOWER(name), name"
+        query += " WHERE is_active = 1"
+    query += " ORDER BY name COLLATE NOCASE"
     with closing(get_db()) as conn:
         return conn.execute(query).fetchall()
 
@@ -171,9 +125,9 @@ def fetch_sectors(active_only: bool = True):
     conditions = ["name <> ?"]
     params = [OPTIONAL_SECTOR_NAME]
     if active_only:
-        conditions.append("is_active = TRUE")
+        conditions.append("is_active = 1")
     query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY LOWER(name), name"
+    query += " ORDER BY name COLLATE NOCASE"
     with closing(get_db()) as conn:
         return conn.execute(query, params).fetchall()
 
@@ -187,14 +141,14 @@ def fetch_racks(active_only: bool = True, only_main_racks: bool = False):
     conditions = []
     params = []
     if active_only:
-        conditions.append("racks.is_active = TRUE")
+        conditions.append("racks.is_active = 1")
     if only_main_racks:
-        conditions.append("racks.name LIKE 'Regał %'")
+        conditions.append("racks.name GLOB 'Regał [0-9]*'")
         conditions.append("racks.name <> ?")
         params.append(OPTIONAL_RACK_NAME)
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
-    query += " ORDER BY LOWER(racks.name), racks.name"
+    query += " ORDER BY racks.name COLLATE NOCASE"
     with closing(get_db()) as conn:
         return conn.execute(query, params).fetchall()
 
@@ -202,8 +156,8 @@ def fetch_racks(active_only: bool = True, only_main_racks: bool = False):
 def fetch_slots_by_rack(active_only: bool = True):
     query = "SELECT rack_slots.*, racks.name AS rack_name FROM rack_slots JOIN racks ON racks.id = rack_slots.rack_id"
     if active_only:
-        query += " WHERE rack_slots.is_active = TRUE"
-    query += " ORDER BY LOWER(racks.name), racks.name, rack_slots.sort_order, LOWER(rack_slots.code), rack_slots.code"
+        query += " WHERE rack_slots.is_active = 1"
+    query += " ORDER BY racks.name COLLATE NOCASE, rack_slots.sort_order, rack_slots.code COLLATE NOCASE"
     with closing(get_db()) as conn:
         rows = conn.execute(query).fetchall()
 
@@ -216,14 +170,14 @@ def fetch_slots_by_rack(active_only: bool = True):
 def fetch_slot_counts():
     with closing(get_db()) as conn:
         rows = conn.execute(
-            "SELECT rack_id, COUNT(*) AS slot_count FROM rack_slots WHERE is_active = TRUE GROUP BY rack_id"
+            "SELECT rack_id, COUNT(*) AS slot_count FROM rack_slots WHERE is_active = 1 GROUP BY rack_id"
         ).fetchall()
     return {row['rack_id']: row['slot_count'] for row in rows}
 
 
 def all_active_slot_codes():
     with closing(get_db()) as conn:
-        rows = conn.execute("SELECT DISTINCT code FROM rack_slots WHERE is_active = TRUE").fetchall()
+        rows = conn.execute("SELECT DISTINCT code FROM rack_slots WHERE is_active = 1").fetchall()
     return sorted((row['code'] for row in rows), key=natural_sort_key)
 
 
@@ -236,7 +190,7 @@ def item_base_select():
                items.extra_field,
                items.created_at,
                COALESCE(items.updated_at, items.created_at) AS updated_at,
-               to_char(COALESCE(items.updated_at, items.created_at) + interval '2 hours', 'DD.MM.YYYY HH24:MI') AS updated_at_display,
+               strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
                items.sector_id,
                items.rack_id,
                items.slot_id,
@@ -260,7 +214,7 @@ def record_item_history(conn: sqlite3.Connection, item_id: int | None, action: s
 def get_latest_system_activity():
     with closing(get_db()) as conn:
         row = conn.execute(
-            "SELECT to_char(changed_at + interval '2 hours', 'DD.MM.YYYY HH24:MI') AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
+            "SELECT strftime('%d.%m.%Y %H:%M', changed_at, '+2 hours') AS changed_at_display FROM item_history ORDER BY changed_at DESC, id DESC LIMIT 1"
         ).fetchone()
     return row['changed_at_display'] if row and row['changed_at_display'] else None
 
@@ -286,7 +240,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         sector_id = str(fallback_sector['id']) if fallback_sector else ''
     else:
         sector_exists = conn.execute(
-            "SELECT id FROM sectors WHERE id = ? AND is_active = TRUE",
+            "SELECT id FROM sectors WHERE id = ? AND is_active = 1",
             (sector_id,),
         ).fetchone()
         if sector_exists is None:
@@ -301,7 +255,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         slot_id = ''
     else:
         rack_exists = conn.execute(
-            "SELECT id FROM racks WHERE id = ? AND is_active = TRUE",
+            "SELECT id FROM racks WHERE id = ? AND is_active = 1",
             (rack_id,),
         ).fetchone()
         if rack_exists is None:
@@ -309,7 +263,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         if not slot_id:
             return None, None, None, 'Jeśli wybierasz regał, wskaż też miejsce w regale.'
         slot_row = conn.execute(
-            "SELECT id FROM rack_slots WHERE id = ? AND rack_id = ? AND is_active = TRUE",
+            "SELECT id FROM rack_slots WHERE id = ? AND rack_id = ? AND is_active = 1",
             (slot_id, rack_id),
         ).fetchone()
         if slot_row is None:
@@ -451,7 +405,7 @@ def search_suggestions(term: str, limit: int = 8):
 
     with closing(get_db()) as conn:
         rows = conn.execute(
-            item_base_select() + " ORDER BY LOWER(items.product_name), items.product_name"
+            item_base_select() + " ORDER BY items.product_name COLLATE NOCASE"
         ).fetchall()
 
     scored = []
@@ -496,7 +450,7 @@ def inject_recent_items():
                     CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector_name,
                     CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack_name,
                     COALESCE(rack_slots.code, '') AS slot_code,
-                    to_char(COALESCE(items.updated_at, items.created_at) + interval '2 hours', 'DD.MM.YYYY HH24:MI') AS changed_display
+                    strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS changed_display
                 FROM items
                 JOIN sectors ON sectors.id = items.sector_id
                 JOIN racks ON racks.id = items.rack_id
@@ -522,7 +476,7 @@ def inject_system_status():
 
     try:
         with closing(get_db()) as conn:
-            conn_type = (getattr(conn, 'engine', '') or type(conn).__module__.lower())
+            conn_type = type(conn).__module__.lower()
 
             if 'psycopg' in conn_type or 'postgres' in conn_type:
                 db_label = 'Neon'
@@ -577,31 +531,95 @@ def inject_system_status():
     }
 
 
-@app.route('/ping')
-def ping():
-    return 'OK KOMNATA', 200
-
 @app.route('/')
 def dashboard():
+    sector_filter = request.args.get('sector_id', '').strip()
+    rack_filter = request.args.get('rack_id', '').strip()
+    slot_filter = request.args.get('slot_id', '').strip()
+
     with closing(get_db()) as conn:
         sectors = fetch_sectors(active_only=True)
         racks = fetch_racks(active_only=True)
+        slot_counts = fetch_slot_counts()
+
+        rack_slots_all = conn.execute(
+            '''
+            SELECT
+                rack_slots.id,
+                rack_slots.rack_id,
+                rack_slots.code,
+                rack_slots.sort_order,
+                rack_slots.is_active
+            FROM rack_slots
+            WHERE rack_slots.is_active = 1
+            ORDER BY rack_slots.rack_id, rack_slots.sort_order, rack_slots.code
+            '''
+        ).fetchall()
+
+        slots_by_rack = {}
+        for row in rack_slots_all:
+            rack_key = str(row['rack_id'])
+            slots_by_rack.setdefault(rack_key, []).append({
+                'id': row['id'],
+                'code': row['code']
+            })
+
+        query = '''
+            SELECT
+                items.id,
+                items.product_name,
+                items.quantity,
+                items.notes,
+                items.extra_field,
+                CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector_name,
+                CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack_name,
+                COALESCE(rack_slots.code, '') AS slot_code,
+                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
+                COALESCE(items.updated_at, items.created_at) AS sort_ts
+            FROM items
+            JOIN sectors ON sectors.id = items.sector_id
+            JOIN racks ON racks.id = items.rack_id
+            LEFT JOIN rack_slots ON rack_slots.id = items.slot_id
+            WHERE 1=1
+        '''
+        params = [OPTIONAL_SECTOR_NAME, OPTIONAL_RACK_NAME]
+
+        if sector_filter:
+            query += " AND items.sector_id = ?"
+            params.append(sector_filter)
+
+        if rack_filter:
+            query += " AND items.rack_id = ?"
+            params.append(rack_filter)
+
+        if slot_filter:
+            query += " AND items.slot_id = ?"
+            params.append(slot_filter)
+
+        query += " ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.id DESC"
+
+        items = conn.execute(query, params).fetchall()
+
+    grouped = {}
+    for item in items:
+        sector_name = item['sector_name'] or '-'
+        rack_name = item['rack_name'] or '-'
+        slot_code = item['slot_code'] or ''
+        grouped.setdefault((sector_name, rack_name, slot_code), []).append(item)
+
     return render_template(
         'dashboard.html',
-        items=[],
-        grouped={},
+        items=items,
+        grouped=grouped,
         sectors=sectors,
         racks=racks,
-        rack_slots=[],
-        slot_counts={},
-        selected_sector_id='',
-        selected_rack_id='',
-        selected_slot_id='',
-        add_selected_rack_id='',
-        add_selected_slot_id='',
-        recent_items=[],
-        slots_by_rack={},
-    ), 200
+        rack_slots=rack_slots_all,
+        slot_counts=slot_counts,
+        selected_sector_id=sector_filter,
+        selected_rack_id=rack_filter,
+        selected_slot_id=slot_filter,
+        slots_by_rack=slots_by_rack,
+    )
 
 
 @app.route('/items/add', methods=['POST'])
@@ -808,7 +826,7 @@ def search():
     if query:
         with closing(get_db()) as conn:
             results = conn.execute(
-                item_base_select() + " WHERE items.product_name LIKE ? OR items.notes LIKE ? ORDER BY COALESCE(items.updated_at, items.created_at) DESC, LOWER(items.product_name), items.product_name",
+                item_base_select() + " WHERE items.product_name LIKE ? OR items.notes LIKE ? ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.product_name COLLATE NOCASE",
                 (f'%{query}%', f'%{query}%'),
             ).fetchall()
         suggestions = search_suggestions(query)
@@ -829,7 +847,7 @@ def api_suggestions():
                 items.product_name,
                 items.quantity,
                 items.notes,
-                to_char(COALESCE(items.updated_at, items.created_at) + interval '2 hours', 'DD.MM.YYYY HH24:MI') AS updated_at_display,
+                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS updated_at_display,
                 CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector,
                 CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack,
                 COALESCE(rack_slots.code, '') AS slot
@@ -843,7 +861,7 @@ def api_suggestions():
                 OR lower(COALESCE(sectors.name, '')) LIKE lower(?)
                 OR lower(COALESCE(racks.name, '')) LIKE lower(?)
                 OR lower(COALESCE(rack_slots.code, '')) LIKE lower(?)
-            ORDER BY COALESCE(items.updated_at, items.created_at) DESC, LOWER(items.product_name), items.product_name
+            ORDER BY COALESCE(items.updated_at, items.created_at) DESC, items.product_name COLLATE NOCASE
             LIMIT 20
             ''',
             (
@@ -887,7 +905,7 @@ def storage_map():
         params.append(selected_slot)
     if conditions:
         query += ' WHERE ' + ' AND '.join(conditions)
-    query += ' ORDER BY LOWER(sectors.name), sectors.name, LOWER(racks.name), racks.name, LOWER(rack_slots.code), rack_slots.code, items.created_at ASC, LOWER(items.product_name), items.product_name'
+    query += ' ORDER BY sectors.name COLLATE NOCASE, racks.name COLLATE NOCASE, rack_slots.code COLLATE NOCASE, items.created_at ASC, items.product_name COLLATE NOCASE'
 
     with closing(get_db()) as conn:
         rows = conn.execute(query, params).fetchall()
@@ -921,7 +939,7 @@ def print_view():
                 CASE WHEN sectors.name = ? THEN '-' ELSE sectors.name END AS sector_name,
                 CASE WHEN racks.name = ? THEN '-' ELSE racks.name END AS rack_name,
                 COALESCE(rack_slots.code, '') AS slot_code,
-                to_char(COALESCE(items.updated_at, items.created_at) + interval '2 hours', 'DD.MM.YYYY HH24:MI') AS added_display,
+                strftime('%d.%m.%Y %H:%M', COALESCE(items.updated_at, items.created_at), '+2 hours') AS added_display,
                 COALESCE(items.updated_at, items.created_at) AS sort_ts
             FROM items
             JOIN sectors ON sectors.id = items.sector_id
@@ -1077,8 +1095,8 @@ def save_products_excel_snapshot():
                 CASE WHEN racks.name = ? THEN '' ELSE racks.name END AS rack_name,
                 COALESCE(rack_slots.code, '') AS slot_code,
                 COALESCE(items.extra_field, '') AS extra_field,
-                COALESCE(to_char(items.created_at + interval '2 hours', 'YYYY-MM-DD HH24:MI:SS'), '') AS created_at,
-                COALESCE(to_char(items.updated_at + interval '2 hours', 'YYYY-MM-DD HH24:MI:SS'), '') AS updated_at
+                COALESCE(items.created_at, '') AS created_at,
+                COALESCE(items.updated_at, '') AS updated_at
             FROM items
             JOIN sectors ON sectors.id = items.sector_id
             JOIN racks ON racks.id = items.rack_id
@@ -1466,12 +1484,8 @@ def import_excel():
 
 
 if __name__ == '__main__':
-    db = get_db()
-    try:
-        if getattr(db, 'engine', '') != 'postgres':
-            init_db()
-    finally:
-        db.close()
-
+    init_db()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+else:
+    init_db()
