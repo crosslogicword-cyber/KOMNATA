@@ -15,6 +15,12 @@ def now_local_display():
 import os
 import re
 import sqlite3
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except Exception:
+    psycopg2 = None
+    RealDictCursor = None
 from contextlib import closing
 from difflib import SequenceMatcher
 from werkzeug.utils import secure_filename
@@ -49,8 +55,50 @@ OPTIONAL_RACK_NAME = 'Bez regału'
 NUMERIC_PREFIX_RE = re.compile(r'^(\d+)')
 
 
+
+class DBCompatConnection:
+    def __init__(self, raw, engine: str):
+        self.raw = raw
+        self.engine = engine
+
+    def execute(self, query, params=()):
+        params = params or ()
+        if self.engine == "postgres":
+            pg_query = query.replace("?", "%s")
+            cur = self.raw.cursor(cursor_factory=RealDictCursor)
+            cur.execute(pg_query, params)
+            return cur
+        return self.raw.execute(query, params)
+
+    def commit(self):
+        return self.raw.commit()
+
+    def rollback(self):
+        return self.raw.rollback()
+
+    def close(self):
+        return self.raw.close()
+
+    def executescript(self, script):
+        if self.engine == "postgres":
+            cur = self.raw.cursor(cursor_factory=RealDictCursor)
+            for part in [x.strip() for x in script.split(";") if x.strip()]:
+                cur.execute(part)
+            return cur
+        return self.raw.executescript(script)
+
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    database_url = (os.environ.get("DATABASE_URL") or "").strip()
+
+    if database_url and psycopg2 is not None:
+        raw = psycopg2.connect(database_url, sslmode="require")
+        raw.autocommit = False
+        return DBCompatConnection(raw, "postgres")
+
+    raw = sqlite3.connect(DB_PATH)
+    raw.row_factory = sqlite3.Row
+    return DBCompatConnection(raw, "sqlite")
+
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -476,7 +524,7 @@ def inject_system_status():
 
     try:
         with closing(get_db()) as conn:
-            conn_type = type(conn).__module__.lower()
+            conn_type = (getattr(conn, 'engine', '') or type(conn).__module__.lower())
 
             if 'psycopg' in conn_type or 'postgres' in conn_type:
                 db_label = 'Neon'
@@ -1484,7 +1532,13 @@ def import_excel():
 
 
 if __name__ == '__main__':
-    init_db()
+    db = get_db()
+    try:
+        if getattr(db, 'engine', '') != 'postgres':
+            init_db()
+    finally:
+        db.close()
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
 else:
