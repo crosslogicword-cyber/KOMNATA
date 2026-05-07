@@ -66,6 +66,23 @@ class DBCompatConnection:
         if self.engine == "postgres":
             pg_query = query.replace("?", "%s")
             pg_query = re.sub(r"\s+COLLATE\s+NOCASE\b", "", pg_query, flags=re.I)
+
+            # SQLite -> PostgreSQL: strftime('%d.%m.%Y %H:%M', COALESCE(...), '+2 hours')
+            pg_query = re.sub(
+                r"strftime\('%d\.%m\.%Y %H:%M',\s*COALESCE\((.*?)\),\s*'\+2 hours'\)",
+                r"to_char(COALESCE(\1) + interval '2 hours', 'DD.MM.YYYY HH24:MI')",
+                pg_query,
+                flags=re.I | re.S
+            )
+
+            # Na wszelki wypadek zamień też prostsze strftime(...)
+            pg_query = re.sub(
+                r"strftime\('%d\.%m\.%Y %H:%M',\s*(.*?),\s*'\+2 hours'\)",
+                r"to_char(\1 + interval '2 hours', 'DD.MM.YYYY HH24:MI')",
+                pg_query,
+                flags=re.I | re.S
+            )
+
             cur = self.raw.cursor(cursor_factory=RealDictCursor)
             cur.execute(pg_query, params)
             return cur
