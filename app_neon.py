@@ -65,6 +65,7 @@ class DBCompatConnection:
         params = params or ()
         if self.engine == "postgres":
             pg_query = query.replace("?", "%s")
+            pg_query = re.sub(r"\s+COLLATE\s+NOCASE\b", "", pg_query, flags=re.I)
             cur = self.raw.cursor(cursor_factory=RealDictCursor)
             cur.execute(pg_query, params)
             return cur
