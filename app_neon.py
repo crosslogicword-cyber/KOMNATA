@@ -152,7 +152,7 @@ def apply_layout_to_rack(conn: sqlite3.Connection, rack_id: int, layout_row: sql
             INSERT INTO rack_slots(rack_id, code, is_active, sort_order)
             VALUES (?, ?, 1, ?)
             ON CONFLICT(rack_id, code) DO UPDATE SET
-                is_active = 1,
+                is_active = TRUE,
                 sort_order = excluded.sort_order
             """,
             (rack_id, code, sort_order),
@@ -162,7 +162,7 @@ def apply_layout_to_rack(conn: sqlite3.Connection, rack_id: int, layout_row: sql
 def fetch_layouts(active_only: bool = True):
     query = "SELECT * FROM layouts"
     if active_only:
-        query += " WHERE is_active = 1"
+        query += " WHERE is_active = TRUE"
     query += " ORDER BY name COLLATE NOCASE"
     with closing(get_db()) as conn:
         return conn.execute(query).fetchall()
@@ -173,7 +173,7 @@ def fetch_sectors(active_only: bool = True):
     conditions = ["name <> ?"]
     params = [OPTIONAL_SECTOR_NAME]
     if active_only:
-        conditions.append("is_active = 1")
+        conditions.append("is_active = TRUE")
     query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY name COLLATE NOCASE"
     with closing(get_db()) as conn:
@@ -189,7 +189,7 @@ def fetch_racks(active_only: bool = True, only_main_racks: bool = False):
     conditions = []
     params = []
     if active_only:
-        conditions.append("racks.is_active = 1")
+        conditions.append("racks.is_active = TRUE")
     if only_main_racks:
         conditions.append("racks.name GLOB 'Regał [0-9]*'")
         conditions.append("racks.name <> ?")
@@ -204,7 +204,7 @@ def fetch_racks(active_only: bool = True, only_main_racks: bool = False):
 def fetch_slots_by_rack(active_only: bool = True):
     query = "SELECT rack_slots.*, racks.name AS rack_name FROM rack_slots JOIN racks ON racks.id = rack_slots.rack_id"
     if active_only:
-        query += " WHERE rack_slots.is_active = 1"
+        query += " WHERE rack_slots.is_active = TRUE"
     query += " ORDER BY racks.name COLLATE NOCASE, rack_slots.sort_order, rack_slots.code COLLATE NOCASE"
     with closing(get_db()) as conn:
         rows = conn.execute(query).fetchall()
@@ -218,14 +218,14 @@ def fetch_slots_by_rack(active_only: bool = True):
 def fetch_slot_counts():
     with closing(get_db()) as conn:
         rows = conn.execute(
-            "SELECT rack_id, COUNT(*) AS slot_count FROM rack_slots WHERE is_active = 1 GROUP BY rack_id"
+            "SELECT rack_id, COUNT(*) AS slot_count FROM rack_slots WHERE is_active = TRUE GROUP BY rack_id"
         ).fetchall()
     return {row['rack_id']: row['slot_count'] for row in rows}
 
 
 def all_active_slot_codes():
     with closing(get_db()) as conn:
-        rows = conn.execute("SELECT DISTINCT code FROM rack_slots WHERE is_active = 1").fetchall()
+        rows = conn.execute("SELECT DISTINCT code FROM rack_slots WHERE is_active = TRUE").fetchall()
     return sorted((row['code'] for row in rows), key=natural_sort_key)
 
 
@@ -288,7 +288,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         sector_id = str(fallback_sector['id']) if fallback_sector else ''
     else:
         sector_exists = conn.execute(
-            "SELECT id FROM sectors WHERE id = ? AND is_active = 1",
+            "SELECT id FROM sectors WHERE id = ? AND is_active = TRUE",
             (sector_id,),
         ).fetchone()
         if sector_exists is None:
@@ -303,7 +303,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         slot_id = ''
     else:
         rack_exists = conn.execute(
-            "SELECT id FROM racks WHERE id = ? AND is_active = 1",
+            "SELECT id FROM racks WHERE id = ? AND is_active = TRUE",
             (rack_id,),
         ).fetchone()
         if rack_exists is None:
@@ -311,7 +311,7 @@ def resolve_location_ids(conn: sqlite3.Connection, sector_id_raw: str, rack_id_r
         if not slot_id:
             return None, None, None, 'Jeśli wybierasz regał, wskaż też miejsce w regale.'
         slot_row = conn.execute(
-            "SELECT id FROM rack_slots WHERE id = ? AND rack_id = ? AND is_active = 1",
+            "SELECT id FROM rack_slots WHERE id = ? AND rack_id = ? AND is_active = TRUE",
             (slot_id, rack_id),
         ).fetchone()
         if slot_row is None:
@@ -599,7 +599,7 @@ def dashboard():
                 rack_slots.sort_order,
                 rack_slots.is_active
             FROM rack_slots
-            WHERE rack_slots.is_active = 1
+            WHERE rack_slots.is_active = TRUE
             ORDER BY rack_slots.rack_id, rack_slots.sort_order, rack_slots.code
             '''
         ).fetchall()
